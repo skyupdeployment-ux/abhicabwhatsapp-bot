@@ -1,0 +1,967 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model addresses {
+  id          String    @id @db.Uuid
+  customer_id String    @db.Uuid
+  label       String    @db.VarChar(40)
+  line1       String    @db.VarChar(255)
+  line2       String?   @db.VarChar(255)
+  landmark    String?   @db.VarChar(120)
+  city        String    @db.VarChar(80)
+  state       String    @db.VarChar(80)
+  pincode     String    @db.VarChar(10)
+  lat         Decimal?  @db.Decimal(10, 7)
+  lng         Decimal?  @db.Decimal(10, 7)
+  is_default  Boolean   @default(false)
+  created_at  DateTime  @default(now())
+  updated_at  DateTime
+  customers   customers @relation(fields: [customer_id], references: [user_id], onDelete: Cascade)
+
+  @@index([customer_id])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This table contains exclusion constraints and requires additional setup for migrations. Visit https://pris.ly/d/exclusion-constraints for more info.
+model allocations {
+  id               String           @id @db.Uuid
+  booking_id       String           @db.Uuid
+  vehicle_id       String           @db.Uuid
+  driver_id        String?          @db.Uuid
+  status           AllocationStatus @default(ACTIVE)
+  starts_at        DateTime
+  ends_at          DateTime
+  assigned_by_id   String?          @db.Uuid
+  accepted_at      DateTime?
+  declined_at      DateTime?
+  released_at      DateTime?
+  created_at       DateTime         @default(now())
+  updated_at       DateTime
+  driver_start_at  DateTime?
+  driver_start_lat Decimal?         @db.Decimal(10, 7)
+  driver_start_lng Decimal?         @db.Decimal(10, 7)
+  bookings         bookings         @relation(fields: [booking_id], references: [id])
+  drivers          drivers?         @relation(fields: [driver_id], references: [user_id])
+  vehicles         vehicles         @relation(fields: [vehicle_id], references: [id])
+
+  @@index([booking_id])
+  @@index([driver_id, status])
+  @@index([starts_at, ends_at])
+  @@index([vehicle_id, status])
+}
+
+model audit_logs {
+  id          String   @id @db.Uuid
+  actor_id    String?  @db.Uuid
+  action      String   @db.VarChar(80)
+  entity_type String   @db.VarChar(48)
+  entity_id   String?  @db.VarChar(64)
+  before      Json?
+  after       Json?
+  ip          String?  @db.VarChar(45)
+  user_agent  String?  @db.VarChar(255)
+  created_at  DateTime @default(now())
+  users       users?   @relation(fields: [actor_id], references: [id])
+
+  @@index([actor_id, created_at])
+  @@index([created_at])
+  @@index([entity_type, entity_id])
+}
+
+model booking_attempts {
+  id             String         @id @db.Uuid
+  customer_id    String?        @db.Uuid
+  booking_id     String?        @unique @db.Uuid
+  outcome        AttemptOutcome @default(PENDING)
+  trip_type      TripType?
+  vehicle_class  String?        @db.VarChar(24)
+  pickup_address String?
+  drop_address   String?
+  pickup_at      DateTime?
+  estimated_fare Decimal?       @db.Decimal(12, 2)
+  failure_reason String?        @db.VarChar(255)
+  source         String?        @db.VarChar(24)
+  ip             String?        @db.VarChar(45)
+  user_agent     String?        @db.VarChar(255)
+  payload        Json           @default("{}")
+  notified_at    DateTime?
+  created_at     DateTime       @default(now())
+  bookings       bookings?      @relation(fields: [booking_id], references: [id])
+  customers      customers?     @relation(fields: [customer_id], references: [user_id])
+
+  @@index([created_at])
+  @@index([customer_id])
+  @@index([outcome, created_at])
+}
+
+model booking_requests {
+  id                                          String               @id @db.Uuid
+  request_number                              String               @unique @db.VarChar(20)
+  customer_id                                 String               @db.Uuid
+  trip_type                                   TripType
+  vehicle_class                               String?              @db.VarChar(24)
+  pickup_address                              String
+  pickup_lat                                  Decimal?             @db.Decimal(10, 7)
+  pickup_lng                                  Decimal?             @db.Decimal(10, 7)
+  pickup_state                                String?              @db.VarChar(64)
+  drop_address                                String
+  drop_lat                                    Decimal?             @db.Decimal(10, 7)
+  drop_lng                                    Decimal?             @db.Decimal(10, 7)
+  drop_state                                  String?              @db.VarChar(64)
+  pickup_at                                   DateTime
+  return_at                                   DateTime?
+  passengers                                  Int?                 @db.SmallInt
+  note                                        String?              @db.VarChar(500)
+  contact_name                                String?              @db.VarChar(120)
+  contact_phone                               String?              @db.VarChar(20)
+  contact_email                               String?              @db.VarChar(180)
+  reason                                      String?              @db.VarChar(200)
+  status                                      BookingRequestStatus @default(NEW)
+  admin_note                                  String?              @db.VarChar(1000)
+  handled_by_id                               String?              @db.Uuid
+  handled_at                                  DateTime?
+  converted_booking_id                        String?              @db.Uuid
+  created_at                                  DateTime             @default(now())
+  updated_at                                  DateTime
+  users_booking_requests_customer_idTousers   users                @relation("booking_requests_customer_idTousers", fields: [customer_id], references: [id])
+  users_booking_requests_handled_by_idTousers users?               @relation("booking_requests_handled_by_idTousers", fields: [handled_by_id], references: [id])
+
+  @@index([customer_id, created_at])
+  @@index([status, created_at])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model booking_stops {
+  id          BigInt    @id @default(autoincrement())
+  booking_id  String    @db.Uuid
+  seq         Int
+  address     String?
+  arrived_at  DateTime?
+  departed_at DateTime?
+  arrived_lat Decimal?  @db.Decimal(10, 7)
+  arrived_lng Decimal?  @db.Decimal(10, 7)
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @default(now())
+  bookings    bookings  @relation(fields: [booking_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "booking_stops_booking_fk")
+
+  @@unique([booking_id, seq], map: "booking_stops_booking_seq_key")
+  @@index([booking_id, seq], map: "booking_stops_booking_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model bookings {
+  id                             String              @id @db.Uuid
+  booking_number                 String              @unique @db.VarChar(20)
+  customer_id                    String              @db.Uuid
+  corporate_account_id           String?             @db.Uuid
+  city_id                        Int
+  trip_type                      TripType
+  status                         BookingStatus       @default(PENDING)
+  vehicle_class                  String              @db.VarChar(24)
+  pickup_address                 String
+  pickup_lat                     Decimal             @db.Decimal(10, 7)
+  pickup_lng                     Decimal             @db.Decimal(10, 7)
+  drop_address                   String
+  drop_lat                       Decimal             @db.Decimal(10, 7)
+  drop_lng                       Decimal             @db.Decimal(10, 7)
+  stops                          Json                @default("[]")
+  pickup_at                      DateTime
+  return_at                      DateTime?
+  distance_km                    Decimal?            @db.Decimal(10, 2)
+  duration_minutes               Int?
+  estimated_fare                 Decimal             @db.Decimal(12, 2)
+  final_fare                     Decimal?            @db.Decimal(12, 2)
+  advance_paid                   Decimal             @default(0) @db.Decimal(12, 2)
+  balance_due                    Decimal             @default(0) @db.Decimal(12, 2)
+  cancellation_fee               Decimal             @default(0) @db.Decimal(12, 2)
+  refund_amount                  Decimal             @default(0) @db.Decimal(12, 2)
+  payment_mode                   PaymentMode
+  payment_method                 PaymentMethod?
+  fare_basis                     Json
+  surge_multiplier               Decimal             @default(1.00) @db.Decimal(4, 2)
+  driver_share_pct               Decimal             @default(80.00) @db.Decimal(5, 2)
+  cancelled_at                   DateTime?
+  cancelled_by_id                String?             @db.Uuid
+  cancelled_by_type              CancelledBy?
+  cancellation_reason            String?
+  special_requests               String?
+  meta                           Json                @default("{}")
+  confirmed_at                   DateTime?
+  started_at                     DateTime?
+  completed_at                   DateTime?
+  created_at                     DateTime            @default(now())
+  updated_at                     DateTime
+  arrived_at                     DateTime?
+  rental_package_id              Int?
+  rental_hours                   Int?
+  rental_km                      Int?
+  reached_at                     DateTime?
+  start_otp                      String?             @db.VarChar(8)
+  start_otp_attempts             Int                 @default(0)
+  start_otp_issued_at            DateTime?
+  start_otp_verified_at          DateTime?
+  guest_name                     String?             @db.VarChar(120)
+  guest_phone                    String?             @db.VarChar(20)
+  guest_email                    String?             @db.VarChar(180)
+  start_odometer_km              Int?
+  start_odometer_photo_url       String?
+  start_odometer_photo_public_id String?             @db.VarChar(200)
+  end_odometer_km                Int?
+  end_odometer_photo_url         String?
+  end_odometer_photo_public_id   String?             @db.VarChar(200)
+  allocations                    allocations[]
+  booking_attempts               booking_attempts?
+  booking_stops                  booking_stops[]
+  users                          users?              @relation(fields: [cancelled_by_id], references: [id])
+  cities                         cities              @relation(fields: [city_id], references: [id])
+  corporate_accounts             corporate_accounts? @relation(fields: [corporate_account_id], references: [id])
+  customers                      customers           @relation(fields: [customer_id], references: [user_id])
+  invoice_lines                  invoice_lines[]
+  ledger_entries                 ledger_entries[]
+  payments                       payments[]
+  trip_events                    trip_events[]
+  trip_reviews                   trip_reviews?
+
+  @@index([city_id, status])
+  @@index([corporate_account_id])
+  @@index([customer_id, created_at])
+  @@index([guest_phone])
+  @@index([pickup_at])
+  @@index([status])
+}
+
+model cities {
+  id              Int               @id @default(autoincrement())
+  name            String            @db.VarChar(80)
+  state           String            @db.VarChar(80)
+  country         String            @default("IN") @db.Char(2)
+  centre_lat      Decimal           @db.Decimal(10, 7)
+  centre_lng      Decimal           @db.Decimal(10, 7)
+  radius_km       Int               @default(50)
+  timezone        String            @default("Asia/Kolkata") @db.VarChar(48)
+  languages       Json              @default("[\"en\", \"hi\"]")
+  welfare_fee_pct Decimal           @default(0) @db.Decimal(4, 2)
+  is_active       Boolean           @default(true)
+  created_at      DateTime          @default(now())
+  local_radius_km Int               @default(25)
+  district        String?           @db.VarChar(80)
+  bookings        bookings[]
+  fare_configs    fare_configs[]
+  rental_packages rental_packages[]
+  vehicles        vehicles[]
+
+  @@unique([name, state])
+  @@index([is_active])
+}
+
+model contacts {
+  id         String        @id @db.Uuid
+  name       String        @db.VarChar(120)
+  mobile     String        @db.VarChar(20)
+  email      String        @db.VarChar(180)
+  topic      String        @db.VarChar(120)
+  message    String
+  status     ContactStatus @default(NEW)
+  ip         String?       @db.VarChar(45)
+  user_agent String?       @db.VarChar(255)
+  created_at DateTime      @default(now())
+  updated_at DateTime
+
+  @@index([created_at])
+  @@index([status])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model corporate_accounts {
+  id              String       @id @db.Uuid
+  company_name    String       @db.VarChar(180)
+  gstin           String       @unique @db.VarChar(15)
+  pan             String?      @db.VarChar(10)
+  billing_email   String       @db.VarChar(180)
+  billing_phone   String?      @db.VarChar(20)
+  billing_address String
+  billing_city    String       @db.VarChar(80)
+  billing_state   String       @db.VarChar(80)
+  billing_pincode String       @db.VarChar(10)
+  billing_cycle   BillingCycle @default(PER_TRIP)
+  credit_limit    Decimal      @default(0) @db.Decimal(12, 2)
+  credit_used     Decimal      @default(0) @db.Decimal(12, 2)
+  is_active       Boolean      @default(true)
+  created_at      DateTime     @default(now())
+  updated_at      DateTime
+  bookings        bookings[]
+  customers       customers[]
+  invoices        invoices[]
+
+  @@index([is_active])
+}
+
+model customers {
+  user_id              String              @id @db.Uuid
+  account_type         AccountType         @default(RETAIL)
+  corporate_account_id String?             @db.Uuid
+  alternate_phone      String?             @db.VarChar(20)
+  gstin                String?             @db.VarChar(15)
+  loyalty_points       Int                 @default(0)
+  total_bookings       Int                 @default(0)
+  notes                String?
+  meta                 Json                @default("{}")
+  created_at           DateTime            @default(now())
+  updated_at           DateTime
+  is_guest             Boolean             @default(false)
+  addresses            addresses[]
+  booking_attempts     booking_attempts[]
+  bookings             bookings[]
+  corporate_accounts   corporate_accounts? @relation(fields: [corporate_account_id], references: [id])
+  users                users               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  trip_reviews         trip_reviews[]
+
+  @@index([account_type])
+  @@index([corporate_account_id])
+  @@index([is_guest])
+}
+
+model device_tokens {
+  id           String   @id @db.Uuid
+  user_id      String   @db.Uuid
+  token        String   @unique @db.VarChar(512)
+  platform     String   @default("android") @db.VarChar(16)
+  last_seen_at DateTime @default(now())
+  created_at   DateTime @default(now())
+  users        users    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+}
+
+model discount_redemptions {
+  id          Int       @id @default(autoincrement())
+  discount_id Int
+  booking_id  String    @unique @db.Uuid
+  customer_id String    @db.Uuid
+  amount      Decimal   @db.Decimal(10, 2)
+  created_at  DateTime  @default(now())
+  discounts   discounts @relation(fields: [discount_id], references: [id])
+
+  @@index([discount_id, customer_id])
+}
+
+model discounts {
+  id                    Int                    @id @default(autoincrement())
+  code                  String                 @unique @db.VarChar(32)
+  description           String                 @db.VarChar(200)
+  type                  DiscountType
+  value                 Decimal                @db.Decimal(10, 2)
+  max_discount          Decimal?               @db.Decimal(10, 2)
+  min_fare              Decimal                @default(0) @db.Decimal(10, 2)
+  max_uses              Int?
+  used_count            Int                    @default(0)
+  max_uses_per_customer Int                    @default(1)
+  applies_to            DiscountScope          @default(ALL_BOOKINGS)
+  starts_at             DateTime               @default(now())
+  expires_at            DateTime?
+  is_active             Boolean                @default(true)
+  created_by_id         String?                @db.Uuid
+  created_at            DateTime               @default(now())
+  updated_at            DateTime
+  discount_redemptions  discount_redemptions[]
+
+  @@index([is_active, expires_at])
+}
+
+model drivers {
+  user_id             String        @id @db.Uuid
+  licence_number      String        @unique @db.VarChar(32)
+  licence_expiry      DateTime?     @db.Date
+  aadhaar_last4       String?       @db.Char(4)
+  kyc_status          KycStatus     @default(PENDING)
+  kyc_verified_at     DateTime?
+  police_verified_at  DateTime?
+  medical_checked_at  DateTime?
+  inducted_at         DateTime?
+  documents           Json          @default("{}")
+  assigned_vehicle_id String?       @db.Uuid
+  rating_avg          Decimal       @default(5.00) @db.Decimal(3, 2)
+  rating_count        Int           @default(0)
+  is_online           Boolean       @default(false)
+  last_ping_at        DateTime?
+  created_at          DateTime      @default(now())
+  updated_at          DateTime
+  is_temporary        Boolean       @default(false)
+  allocations         allocations[]
+  vehicles            vehicles?     @relation(fields: [assigned_vehicle_id], references: [id])
+  users               users         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([is_online])
+  @@index([is_temporary])
+  @@index([kyc_status])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model fare_configs {
+  id                 Int      @id @default(autoincrement())
+  city_id            Int
+  vehicle_class      String   @db.VarChar(24)
+  trip_type          TripType
+  base_fare          Decimal  @default(0) @db.Decimal(10, 2)
+  per_km             Decimal  @db.Decimal(10, 2)
+  per_minute         Decimal  @default(0) @db.Decimal(10, 2)
+  minimum_fare       Decimal  @default(0) @db.Decimal(10, 2)
+  cancellation_fee   Decimal  @default(0) @db.Decimal(10, 2)
+  return_empty_pct   Decimal  @default(0) @db.Decimal(5, 2)
+  min_km_per_day     Int      @default(0)
+  driver_allowance   Decimal  @default(0) @db.Decimal(10, 2)
+  waiting_per_hour   Decimal  @default(0) @db.Decimal(10, 2)
+  free_waiting_min   Int      @default(0)
+  night_charge_pct   Decimal  @default(0) @db.Decimal(5, 2)
+  night_start_hour   Int      @default(21)
+  night_end_hour     Int      @default(6)
+  max_surge          Decimal  @default(2.00) @db.Decimal(4, 2)
+  min_surge          Decimal  @default(1.00) @db.Decimal(4, 2)
+  effective_from     DateTime @default(now())
+  is_active          Boolean  @default(true)
+  created_at         DateTime @default(now())
+  airport_surcharge  Decimal  @default(0) @db.Decimal(10, 2)
+  hourly_rate        Decimal  @default(0) @db.Decimal(10, 2)
+  hourly_km_per_hour Int      @default(10)
+  night_allowance    Decimal  @default(0) @db.Decimal(10, 2)
+  night_start_minute Int      @default(55)
+  night_end_minute   Int      @default(0)
+  minimum_km         Decimal  @default(0) @db.Decimal(10, 2)
+  cities             cities   @relation(fields: [city_id], references: [id])
+
+  @@unique([city_id, vehicle_class, trip_type, effective_from])
+  @@index([city_id, is_active])
+}
+
+model gst_config {
+  id                  Int      @id @default(autoincrement())
+  state               String   @db.VarChar(80)
+  district            String?  @db.VarChar(80)
+  gstin               String   @unique @db.VarChar(15)
+  legal_name          String   @db.VarChar(180)
+  address             String?
+  rate_pct            Decimal  @default(18.00) @db.Decimal(5, 2)
+  is_inclusive        Boolean  @default(false)
+  apply_one_way       Boolean  @default(true)
+  apply_round_trip    Boolean  @default(true)
+  apply_airport       Boolean  @default(true)
+  apply_hourly        Boolean  @default(true)
+  interstate_by_route Boolean  @default(false)
+  hsn_sac             String   @default("9964") @db.VarChar(10)
+  is_active           Boolean  @default(true)
+  created_at          DateTime @default(now())
+  updated_at          DateTime @default(now())
+  apply_retail        Boolean  @default(false)
+  apply_corporate     Boolean  @default(true)
+}
+
+model idempotency_keys {
+  key           String            @id @db.VarChar(120)
+  user_id       String?           @db.Uuid
+  endpoint      String            @db.VarChar(120)
+  request_hash  String            @db.Char(64)
+  status        IdempotencyStatus @default(IN_FLIGHT)
+  response_code Int?
+  response_body Json?
+  created_at    DateTime          @default(now())
+  expires_at    DateTime
+  users         users?            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([expires_at])
+}
+
+model invoice_lines {
+  id          String    @id @db.Uuid
+  invoice_id  String    @db.Uuid
+  booking_id  String?   @db.Uuid
+  description String
+  quantity    Decimal   @default(1) @db.Decimal(10, 2)
+  unit_price  Decimal   @db.Decimal(12, 2)
+  amount      Decimal   @db.Decimal(12, 2)
+  created_at  DateTime  @default(now())
+  bookings    bookings? @relation(fields: [booking_id], references: [id])
+  invoices    invoices  @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+
+  @@index([booking_id])
+  @@index([invoice_id])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model invoices {
+  id                   String              @id @db.Uuid
+  invoice_number       String              @unique @db.VarChar(40)
+  series               String              @default("A") @db.VarChar(8)
+  financial_year       String              @db.VarChar(9)
+  type                 InvoiceType
+  status               InvoiceStatus       @default(ISSUED)
+  customer_id          String?             @db.Uuid
+  corporate_account_id String?             @db.Uuid
+  bill_to_name         String              @db.VarChar(180)
+  bill_to_address      String?
+  bill_to_gstin        String?             @db.VarChar(15)
+  subtotal             Decimal             @db.Decimal(12, 2)
+  discount             Decimal             @default(0) @db.Decimal(12, 2)
+  taxable_value        Decimal             @db.Decimal(12, 2)
+  cgst                 Decimal             @default(0) @db.Decimal(12, 2)
+  sgst                 Decimal             @default(0) @db.Decimal(12, 2)
+  igst                 Decimal             @default(0) @db.Decimal(12, 2)
+  total_amount         Decimal             @db.Decimal(12, 2)
+  place_of_supply      String?             @db.VarChar(80)
+  hsn_sac              String?             @db.VarChar(10)
+  notes                String?
+  pdf_url              String?
+  issued_at            DateTime            @default(now())
+  due_at               DateTime?
+  paid_at              DateTime?
+  created_at           DateTime            @default(now())
+  updated_at           DateTime
+  seller_gstin         String?             @db.VarChar(15)
+  seller_state         String?             @db.VarChar(80)
+  seller_legal_name    String?             @db.VarChar(180)
+  seller_address       String?
+  gst_rate_pct         Decimal             @default(0) @db.Decimal(5, 2)
+  gst_inclusive        Boolean             @default(true)
+  invoice_lines        invoice_lines[]
+  corporate_accounts   corporate_accounts? @relation(fields: [corporate_account_id], references: [id])
+
+  @@index([corporate_account_id])
+  @@index([customer_id])
+  @@index([issued_at])
+  @@index([type, status])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model ledger_entries {
+  id         String          @id @db.Uuid
+  user_id    String?         @db.Uuid
+  booking_id String?         @db.Uuid
+  entry_type LedgerEntryType
+  direction  LedgerDirection
+  amount     Decimal         @db.Decimal(12, 2)
+  currency   String          @default("INR") @db.Char(3)
+  reference  String          @unique @db.VarChar(160)
+  note       String?
+  meta       Json            @default("{}")
+  created_at DateTime        @default(now())
+  bookings   bookings?       @relation(fields: [booking_id], references: [id], onDelete: Restrict)
+  users      users?          @relation(fields: [user_id], references: [id], onDelete: Restrict)
+
+  @@index([booking_id])
+  @@index([entry_type, created_at])
+  @@index([user_id, created_at])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model payments {
+  id                  String         @id @db.Uuid
+  booking_id          String         @db.Uuid
+  provider            String         @db.VarChar(24)
+  provider_order_id   String?        @db.VarChar(120)
+  provider_payment_id String?        @db.VarChar(120)
+  amount              Decimal        @db.Decimal(12, 2)
+  currency            String         @default("INR") @db.Char(3)
+  method              PaymentMethod?
+  status              PaymentStatus  @default(CREATED)
+  purpose             String         @db.VarChar(20)
+  raw_response        Json           @default("{}")
+  failure_reason      String?        @db.VarChar(255)
+  paid_at             DateTime?
+  created_at          DateTime       @default(now())
+  updated_at          DateTime
+  bookings            bookings       @relation(fields: [booking_id], references: [id])
+
+  @@unique([provider, provider_order_id])
+  @@index([booking_id])
+  @@index([status, created_at])
+}
+
+model refresh_tokens {
+  id         String    @id @db.Uuid
+  user_id    String    @db.Uuid
+  token_hash String    @unique @db.Char(64)
+  expires_at DateTime
+  revoked_at DateTime?
+  user_agent String?   @db.VarChar(255)
+  ip         String?   @db.VarChar(45)
+  created_at DateTime  @default(now())
+  users      users     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([expires_at])
+  @@index([user_id])
+}
+
+model rental_packages {
+  id             Int      @id @default(autoincrement())
+  city_id        Int
+  vehicle_class  String   @db.VarChar(24)
+  label          String   @db.VarChar(40)
+  included_hours Int
+  included_km    Int
+  package_fare   Decimal  @db.Decimal(10, 2)
+  extra_per_hour Decimal  @db.Decimal(10, 2)
+  extra_per_km   Decimal  @db.Decimal(10, 2)
+  sort_order     Int      @default(0)
+  is_active      Boolean  @default(true)
+  created_at     DateTime @default(now())
+  cities         cities   @relation(fields: [city_id], references: [id])
+
+  @@index([city_id, vehicle_class, is_active])
+}
+
+model role_permissions {
+  id         Int    @id @default(autoincrement())
+  role       Role
+  permission String @db.VarChar(48)
+
+  @@unique([role, permission])
+  @@index([role])
+}
+
+model service_areas {
+  id         Int      @id @default(autoincrement())
+  name       String   @unique @db.VarChar(80)
+  tier       AreaTier
+  centre_lat Decimal  @db.Decimal(10, 7)
+  centre_lng Decimal  @db.Decimal(10, 7)
+  radius_km  Int      @default(15)
+  note       String?  @db.VarChar(500)
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime
+
+  @@index([is_active])
+}
+
+model service_states {
+  id            Int      @id @default(autoincrement())
+  name          String   @unique @db.VarChar(64)
+  code          String?  @db.VarChar(8)
+  aliases       Json     @default("[]")
+  is_active     Boolean  @default(true)
+  note          String?  @db.VarChar(500)
+  created_by_id String?  @db.Uuid
+  created_at    DateTime @default(now())
+  updated_at    DateTime
+
+  @@index([is_active])
+}
+
+model surge_rules {
+  id                       Int      @id @default(autoincrement())
+  tier                     AreaTier @unique
+  immediate_within_minutes Int      @default(240)
+  immediate_pct            Decimal  @default(0) @db.Decimal(5, 2)
+  standard_pct             Decimal  @default(0) @db.Decimal(5, 2)
+  is_active                Boolean  @default(true)
+  updated_at               DateTime
+}
+
+model trip_events {
+  id          String   @id @db.Uuid
+  booking_id  String   @db.Uuid
+  event_type  String   @db.VarChar(40)
+  lat         Decimal? @db.Decimal(10, 7)
+  lng         Decimal? @db.Decimal(10, 7)
+  odometer_km Int?
+  note        String?
+  meta        Json     @default("{}")
+  occurred_at DateTime @default(now())
+  bookings    bookings @relation(fields: [booking_id], references: [id], onDelete: Cascade)
+
+  @@index([booking_id, occurred_at])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model trip_reviews {
+  booking_id  String    @id @db.Uuid
+  customer_id String    @db.Uuid
+  driver_id   String?   @db.Uuid
+  rating      Int       @db.SmallInt
+  comment     String?
+  status      String    @default("NEW") @db.VarChar(16)
+  admin_note  String?
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @default(now())
+  bookings    bookings  @relation(fields: [booking_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "trip_reviews_booking_fk")
+  customers   customers @relation(fields: [customer_id], references: [user_id], onUpdate: NoAction, map: "trip_reviews_customer_fk")
+
+  @@index([driver_id, created_at(sort: Desc)], map: "trip_reviews_driver_idx")
+  @@index([rating, created_at(sort: Desc)], map: "trip_reviews_rating_idx")
+  @@index([status, created_at(sort: Desc)], map: "trip_reviews_status_idx")
+}
+
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model users {
+  id                                                     String             @id @db.Uuid
+  name                                                   String             @db.VarChar(120)
+  email                                                  String             @unique @db.VarChar(180)
+  password                                               String             @db.VarChar(255)
+  phone                                                  String?            @unique @db.VarChar(20)
+  role                                                   Role               @default(USER)
+  is_active                                              Boolean            @default(true)
+  created_at                                             DateTime           @default(now())
+  updated_at                                             DateTime
+  audit_logs                                             audit_logs[]
+  booking_requests_booking_requests_customer_idTousers   booking_requests[] @relation("booking_requests_customer_idTousers")
+  booking_requests_booking_requests_handled_by_idTousers booking_requests[] @relation("booking_requests_handled_by_idTousers")
+  bookings                                               bookings[]
+  customers                                              customers?
+  device_tokens                                          device_tokens[]
+  drivers                                                drivers?
+  idempotency_keys                                       idempotency_keys[]
+  ledger_entries                                         ledger_entries[]
+  refresh_tokens                                         refresh_tokens[]
+
+  @@index([created_at])
+  @@index([phone])
+  @@index([role])
+}
+
+model vehicle_catalog {
+  id             Int      @id @default(autoincrement())
+  key            String   @unique @db.VarChar(24)
+  name           String   @db.VarChar(60)
+  seats          Int
+  blurb          String   @db.VarChar(160)
+  detail         String   @db.VarChar(1000)
+  luggage        String   @db.VarChar(60)
+  glyph          String   @default("🚗") @db.VarChar(8)
+  transmission   String?  @db.VarChar(16)
+  fuel           String?  @db.VarChar(16)
+  rating         Decimal? @db.Decimal(3, 2)
+  trips          Int?
+  hero_url       String?
+  hero_public_id String?  @db.VarChar(200)
+  images         Json     @default("[]")
+  sort_order     Int      @default(0)
+  is_active      Boolean  @default(true)
+  created_at     DateTime @default(now())
+  updated_at     DateTime
+
+  @@index([is_active, sort_order])
+}
+
+model vehicles {
+  id                  String        @id @db.Uuid
+  registration_number String        @unique @db.VarChar(16)
+  vehicle_class       String        @db.VarChar(24)
+  make_model          String?       @db.VarChar(80)
+  year                Int?
+  colour              String?       @db.VarChar(40)
+  seating_capacity    Int           @default(4)
+  status              VehicleStatus @default(AVAILABLE)
+  city_id             Int?
+  insurance_expiry    DateTime?     @db.Date
+  fitness_expiry      DateTime?     @db.Date
+  permit_expiry       DateTime?     @db.Date
+  puc_expiry          DateTime?     @db.Date
+  documents           Json          @default("{}")
+  odometer_km         Int           @default(0)
+  is_active           Boolean       @default(true)
+  created_at          DateTime      @default(now())
+  updated_at          DateTime
+  is_temporary        Boolean       @default(false)
+  allocations         allocations[]
+  drivers             drivers[]
+  cities              cities?       @relation(fields: [city_id], references: [id])
+
+  @@index([city_id])
+  @@index([is_temporary])
+  @@index([status])
+  @@index([vehicle_class, status])
+}
+
+model webhook_events {
+  id           String    @id @db.Uuid
+  provider     String    @db.VarChar(24)
+  event_id     String    @db.VarChar(160)
+  event_type   String    @db.VarChar(80)
+  payload      Json
+  signature    String?   @db.VarChar(255)
+  processed_at DateTime?
+  failed_at    DateTime?
+  error        String?
+  attempts     Int       @default(0)
+  received_at  DateTime  @default(now())
+
+  @@unique([provider, event_id])
+  @@index([processed_at])
+}
+
+enum AccountType {
+  RETAIL
+  CORPORATE
+}
+
+enum AllocationStatus {
+  ACTIVE
+  RELEASED
+  CANCELLED
+}
+
+enum AreaTier {
+  METRO
+  DISTRICT
+  TALUKA
+  VILLAGE
+}
+
+enum AttemptOutcome {
+  COMPLETED
+  PENDING
+  ABANDONED
+  FAILED
+}
+
+enum BillingCycle {
+  PER_TRIP
+  WEEKLY
+  MONTHLY
+}
+
+enum BookingRequestStatus {
+  NEW
+  REVIEWING
+  QUOTED
+  ACCEPTED
+  DECLINED
+  CANCELLED
+}
+
+enum BookingStatus {
+  ATTEMPTED
+  PENDING
+  CONFIRMED
+  ALLOCATED
+  EN_ROUTE
+  ONGOING
+  ARRIVED
+  COMPLETED
+  CANCELLED
+  EXPIRED
+  REACHED
+}
+
+enum CancelledBy {
+  CUSTOMER
+  DRIVER
+  ADMIN
+  SYSTEM
+}
+
+enum ContactStatus {
+  NEW
+  READ
+  RESPONDED
+  ARCHIVED
+}
+
+enum DiscountScope {
+  ALL_BOOKINGS
+  FIRST_RIDE
+  CORPORATE
+  AIRPORT
+}
+
+enum DiscountType {
+  PERCENT
+  FLAT
+}
+
+enum IdempotencyStatus {
+  IN_FLIGHT
+  COMPLETED
+  FAILED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  CANCELLED
+}
+
+enum InvoiceType {
+  TAX
+  NON_TAX
+}
+
+enum KycStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  SUSPENDED
+}
+
+enum LedgerDirection {
+  CREDIT
+  DEBIT
+}
+
+enum LedgerEntryType {
+  FARE_CHARGED
+  ADVANCE_RECEIVED
+  BALANCE_RECEIVED
+  DRIVER_CREDIT
+  COMMISSION
+  WELFARE_FEE
+  CANCELLATION_FEE
+  REFUND
+  PAYOUT
+  ADJUSTMENT
+}
+
+enum PaymentMethod {
+  UPI
+  CARD
+  NETBANKING
+  WALLET
+  CASH
+}
+
+enum PaymentMode {
+  ZERO
+  PARTIAL
+  FULL
+}
+
+enum PaymentStatus {
+  CREATED
+  AUTHORISED
+  CAPTURED
+  PARTIALLY_PAID
+  FAILED
+  REFUNDED
+}
+
+enum Role {
+  USER
+  ADMIN
+  DRIVER
+  OPS
+  FINANCE
+  FLEET
+  SUPPORT
+}
+
+enum TripType {
+  ONE_WAY
+  ROUND_TRIP
+  AIRPORT
+  HOURLY
+}
+
+enum VehicleStatus {
+  AVAILABLE
+  ASSIGNED
+  ON_TRIP
+  MAINTENANCE
+  INACTIVE
+}
