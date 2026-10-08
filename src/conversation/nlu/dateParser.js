@@ -283,6 +283,102 @@ function parseDateReply(replyId) {
   return m ? m[1] : null;
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Date / time pickers: 7 items per page + "Next 7 days" / "More times" (WhatsApp list)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DATES_PER_PAGE = 7;
+const TIMES_PER_PAGE = 7;
+const SLOT_MINUTES = 30;     // gap between time slots
+const DAY_START_HOUR = 6;    // first slot shown for a future date (customers can still type any time)
+
+const pad2 = (n) => String(n).padStart(2, '0');
+
+/** One page of dates. Row ids stay DATE_YYYY-MM-DD; navigation rows are DATE_NEXT / DATE_PREV. */
+function getDatePage({ page = 0, from, labels = {} } = {}) {
+  const L = { today: 'Today', tomorrow: 'Tomorrow', next: 'Next 7 days', earlier: 'Earlier dates', ...labels };
+  const base = now().startOf('day');
+  let start = from ? dayjs(from).tz(TZ).startOf('day') : base;
+  if (start.isBefore(base)) start = base;
+  const first = start.add(Math.max(0, page) * DATES_PER_PAGE, 'day');
+
+  const dateRows = [];
+  for (let i = 0; i < DATES_PER_PAGE; i += 1) {
+    const d = first.add(i, 'day');
+    const diff = d.diff(base, 'day');
+    const label = d.format('ddd DD MMM'); // Thu 08 Oct
+    const title = diff === 0 ? `${L.today} · ${label}` : diff === 1 ? `${L.tomorrow} · ${label}` : label;
+    dateRows.push({
+      id: `DATE_${d.format('YYYY-MM-DD')}`,
+      title: title.slice(0, 24),
+      description: d.format('dddd'), // Thursday
+    });
+  }
+  const moreRows = [];
+  if (page > 0) moreRows.push({ id: 'DATE_PREV', title: `⬅️ ${L.earlier}`.slice(0, 24) });
+  moreRows.push({ id: 'DATE_NEXT', title: `➡️ ${L.next}`.slice(0, 24) });
+  return { dateRows, moreRows };
+}
+
+/**
+ * All pickup-time slots (minutes since midnight) for `date`.
+ * Today starts at the next slot after the current time; a later day starts at DAY_START_HOUR.
+ * `notBefore` (e.g. the outbound pickup, for a return trip) pushes the start later on that same day.
+ */
+function getTimeSlots({ date, notBefore } = {}) {
+  const day = date.tz(TZ).startOf('day');
+  let lower = now();
+  if (notBefore && dayjs(notBefore).isAfter(lower)) lower = dayjs(notBefore).tz(TZ);
+
+  let startMin;
+  if (lower.isSame(day, 'day')) {
+    startMin = (Math.floor((lower.hour() * 60 + lower.minute()) / SLOT_MINUTES) + 1) * SLOT_MINUTES;
+  } else if (lower.isBefore(day)) {
+    startMin = DAY_START_HOUR * 60;
+  } else {
+    return []; // the day is already over
+  }
+  const slots = [];
+  for (let m = startMin; m < 24 * 60; m += SLOT_MINUTES) slots.push(m);
+  return slots;
+}
+
+function formatSlot(minutes) {
+  const h = Math.floor(minutes / 60);
+  const mi = minutes % 60;
+  return `${h % 12 || 12}:${pad2(mi)} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+function partOfDay(hour) {
+  if (hour >= 5 && hour < 12) return 'Morning';
+  if (hour >= 12 && hour < 17) return 'Afternoon';
+  if (hour >= 17 && hour < 21) return 'Evening';
+  return 'Night';
+}
+
+/** One page of time slots plus the navigation rows (More times / Earlier times / Change date). */
+function getTimePage({ slots, page = 0, labels = {} }) {
+  const L = { more: 'More times', earlier: 'Earlier times', change: 'Change date', ...labels };
+  const slice = slots.slice(page * TIMES_PER_PAGE, (page + 1) * TIMES_PER_PAGE);
+  const timeRows = slice.map((m) => ({
+    id: `TIME_${pad2(Math.floor(m / 60))}${pad2(m % 60)}`,
+    title: formatSlot(m),
+    description: partOfDay(Math.floor(m / 60)),
+  }));
+  const moreRows = [];
+  if (page > 0) moreRows.push({ id: 'TIME_EARLIER', title: `⬅️ ${L.earlier}`.slice(0, 24) });
+  if ((page + 1) * TIMES_PER_PAGE < slots.length) moreRows.push({ id: 'TIME_MORE', title: `➡️ ${L.more}`.slice(0, 24) });
+  moreRows.push({ id: 'TIME_CHANGE_DATE', title: `📅 ${L.change}`.slice(0, 24) });
+  return { timeRows, moreRows, lastPage: Math.max(0, Math.ceil(slots.length / TIMES_PER_PAGE) - 1) };
+}
+
+/** 'TIME_0930' -> { hour: 9, minute: 30 }. Anything else -> null. */
+function parseTimeReply(replyId) {
+  const m = /^TIME_(\d{2})(\d{2})$/.exec(replyId || '');
+  return m ? { hour: parseInt(m[1], 10), minute: parseInt(m[2], 10) } : null;
+}
+
 module.exports = {
   TZ,
   now,
@@ -294,4 +390,8 @@ module.exports = {
   getDateListRows,
   buildDateListMessage,
   parseDateReply,
+  getDatePage,
+  getTimeSlots,
+  getTimePage,
+  parseTimeReply,
 };
