@@ -48,7 +48,7 @@ const env = {
   ),
 
   REDIS_URL: required('REDIS_URL'),
-  ADMIN_API_KEY: required('ADMIN_API_KEY', 'change_me_admin_key'),
+  ADMIN_API_KEY: required('ADMIN_API_KEY'), // no default: an unset key disables the admin API
 
   TIMEZONE: 'Asia/Kolkata',
 };
