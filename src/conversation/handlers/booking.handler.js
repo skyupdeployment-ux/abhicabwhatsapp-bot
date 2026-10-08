@@ -147,42 +147,66 @@ async function handleBookingDrop(ctx) {
  */
 async function promptDate(ctx, { returnTrip = false } = {}) {
   const { language, session } = ctx;
+  const page = session.draft[returnTrip ? '_returnDatePage' : '_datePage'] || 0;
   const labels = {
     today: tOr(language, 'date_today', 'Today'),
     tomorrow: tOr(language, 'date_tomorrow', 'Tomorrow'),
-    another: tOr(language, 'date_another', 'Another date'),
-    anotherHint: tOr(language, 'date_another_hint', 'Type it, e.g. 25 October'),
   };
   const from = returnTrip && session.draft.pickupAt ? session.draft.pickupAt : undefined;
-  const rows = dateParser.getDateListRows({ from, labels });
+  const { dateRows, moreRows } = dateParser.getDatePage({ page, from, labels });
 
   await ctx.send.listRaw(
-    t(language, returnTrip ? 'ask_return_date' : 'ask_date'),
+    returnTrip
+      ? tOr(language, 'ask_return_date_body', 'What date will you return?')
+      : tOr(language, 'ask_date_body', 'What date would you like to travel?'),
     tOr(language, 'date_pick_button', 'Pick a date'),
-    [{ title: tOr(language, 'date_section_title', 'Dates'), rows }]
+    [
+      { title: tOr(language, 'date_section_available', 'Available dates'), rows: dateRows },
+      { title: tOr(language, 'date_section_more', 'More'), rows: moreRows },
+    ],
+    {
+      header: returnTrip ? tOr(language, 'return_date_header', '📅 Return Date') : tOr(language, 'date_header', '📅 Pick a Date'),
+      footer: tOr(language, 'date_footer', 'Tap "Next 7 days" to see more, or type a date'),
+    }
   );
 }
 
 /**
- * Reads the customer's date answer, whether they tapped a calendar row or typed.
- * Returns { resolved } (a dayjs date), { other: true } when they tapped
- * "Another date", or {} when it could not be understood.
+ * Reads the customer's date answer, whether they tapped a row or typed.
+ * Returns { resolved } (a dayjs date), { nav: +1/-1 } for Next 7 days / Earlier dates,
+ * { other: true } for the old "Another date" row, or {} when it could not be understood.
  */
 function readDateAnswer(message) {
-  const title = message.text || message.interactiveTitle || '';
+  const title = (message.text || message.interactiveTitle || '').trim();
 
-  if (message.interactiveId === 'DATE_OTHER' || /^another date$/i.test(title.trim())) {
-    return { other: true };
-  }
+  if (message.interactiveId === 'DATE_NEXT' || /next\s*7\s*days/i.test(title)) return { nav: 1 };
+  if (message.interactiveId === 'DATE_PREV' || /earlier\s*dates/i.test(title)) return { nav: -1 };
+  if (message.interactiveId === 'DATE_OTHER' || /^another date$/i.test(title)) return { other: true };
 
   const tapped = dateParser.parseDateReply(message.interactiveId);
-  const resolved = dateParser.resolveDatePhrase(tapped || title);
+  // A tapped row can also arrive as plain text, e.g. "Today · Thu 08 Oct" or "Sat 10 Oct".
+  const rowText = title.match(/[A-Za-z]{3}\s+(\d{1,2})\s+([A-Za-z]{3})\s*$/);
+  const resolved = dateParser.resolveDatePhrase(tapped || (rowText ? `${rowText[1]} ${rowText[2]}` : title));
   return resolved ? { resolved } : {};
+}
+
+async function changeDatePage(ctx, answer, { returnTrip = false } = {}) {
+  const { session } = ctx;
+  const key = returnTrip ? '_returnDatePage' : '_datePage';
+  session.draft[key] = Math.max(0, (session.draft[key] || 0) + answer.nav);
+  session.markModified('draft');
+  await session.save();
+  await promptDate(ctx, { returnTrip });
 }
 
 async function handleBookingDate(ctx) {
   const { message, session } = ctx;
   const answer = readDateAnswer(message);
+
+  if (answer.nav) {
+    await changeDatePage(ctx, answer);
+    return;
+  }
 
   if (answer.other) {
     await ctx.send.raw(
@@ -203,19 +227,95 @@ async function handleBookingDate(ctx) {
   }
 
   session.draft._pendingDate = answer.resolved.toISOString(); // temp holder until time is combined
+  delete session.draft._datePage;
+  delete session.draft._timePage;
+  session.markModified('draft');
   await session.save();
   await transition(session, STATES.BOOKING_TIME);
-  await ctx.send.text('ask_time');
+  await promptTime(ctx);
 }
 
 // ── STEP 5: Time ─────────────────────────────────────────────────────
 
+/** Time list: 7 slots, "More times", "Change date". Today starts from the current time. */
+async function promptTime(ctx, { returnTrip = false } = {}) {
+  const { language, session } = ctx;
+  const date = dayjs(returnTrip ? session.draft._pendingReturnDate : session.draft._pendingDate).tz(dateParser.TZ);
+  const notBefore = returnTrip && session.draft.pickupAt ? dayjs(session.draft.pickupAt).tz(dateParser.TZ) : null;
+  const slots = dateParser.getTimeSlots({ date, notBefore });
+
+  if (!slots.length) {
+    await ctx.send.raw(tOr(language, 'no_slots_left', 'There are no more time slots left on that day. Please choose another date.'));
+    await transition(session, returnTrip ? STATES.BOOKING_RETURN_DATE : STATES.BOOKING_DATE);
+    await promptDate(ctx, { returnTrip });
+    return;
+  }
+
+  const key = returnTrip ? '_returnTimePage' : '_timePage';
+  const { lastPage } = dateParser.getTimePage({ slots, page: 0 });
+  const page = Math.min(session.draft[key] || 0, lastPage);
+  const { timeRows, moreRows } = dateParser.getTimePage({ slots, page });
+
+  const question = returnTrip
+    ? tOr(language, 'ask_return_time_body', 'What time should we pick you up for the return? (IST)')
+    : tOr(language, 'ask_time_body', 'What time should the cab arrive? (IST)');
+
+  await ctx.send.listRaw(
+    `Great — *${date.format('dddd, D MMM YYYY')}*.\n\n${question}`,
+    tOr(language, 'time_pick_button', 'Pick a time'),
+    [
+      { title: tOr(language, 'time_section_available', 'Available time slots'), rows: timeRows },
+      { title: tOr(language, 'date_section_more', 'More'), rows: moreRows },
+    ],
+    {
+      header: tOr(language, 'time_header', '⏰ Pick a Time'),
+      footer: tOr(language, 'time_footer', 'All times are in IST. Or type a time, e.g. 6:45 PM'),
+    }
+  );
+}
+
+/** Reads a time answer: tapped slot, "More times", "Earlier times", "Change date", or typed text. */
+function readTimeAnswer(message) {
+  const title = (message.text || message.interactiveTitle || '').trim();
+  const id = message.interactiveId || '';
+
+  if (id === 'TIME_MORE' || /more\s*times/i.test(title)) return { nav: 1 };
+  if (id === 'TIME_EARLIER' || /earlier\s*times/i.test(title)) return { nav: -1 };
+  if (id === 'TIME_CHANGE_DATE' || /change\s*date/i.test(title)) return { changeDate: true };
+
+  const time = dateParser.parseTimeReply(id) || dateParser.resolveTimePhrase(title);
+  return time ? { time } : {};
+}
+
+async function changeTimePage(ctx, answer, { returnTrip = false } = {}) {
+  const { session } = ctx;
+  const key = returnTrip ? '_returnTimePage' : '_timePage';
+  session.draft[key] = Math.max(0, (session.draft[key] || 0) + answer.nav);
+  session.markModified('draft');
+  await session.save();
+  await promptTime(ctx, { returnTrip });
+}
+
 async function handleBookingTime(ctx) {
   const { message, session } = ctx;
-  const time = dateParser.resolveTimePhrase(message.text || message.interactiveTitle);
+  const answer = readTimeAnswer(message);
 
+  if (answer.nav) {
+    await changeTimePage(ctx, answer);
+    return;
+  }
+  if (answer.changeDate) {
+    delete session.draft._datePage;
+    delete session.draft._timePage;
+    session.markModified('draft');
+    await transition(session, STATES.BOOKING_DATE);
+    await promptDate(ctx);
+    return;
+  }
+
+  const time = answer.time;
   if (!time) {
-    await ctx.send.text('ask_time');
+    await promptTime(ctx);
     return;
   }
 
@@ -232,7 +332,9 @@ async function handleBookingTime(ctx) {
     return;
   }
 
+  delete session.draft._timePage;
   session.draft.pickupAt = combined.toDate();
+  session.markModified('draft');
   await session.save();
 
   if (session.draft.tripType === 'ROUND_TRIP') {
@@ -255,6 +357,11 @@ async function handleBookingReturnDate(ctx) {
   const { message, session } = ctx;
   const answer = readDateAnswer(message);
 
+  if (answer.nav) {
+    await changeDatePage(ctx, answer, { returnTrip: true });
+    return;
+  }
+
   if (answer.other) {
     await ctx.send.raw(
       tOr(ctx.language, 'ask_date_typed', '📅 Please type the travel date, for example 25 October or 25/10.')
@@ -275,16 +382,34 @@ async function handleBookingReturnDate(ctx) {
   }
 
   session.draft._pendingReturnDate = answer.resolved.toISOString();
+  delete session.draft._returnDatePage;
+  delete session.draft._returnTimePage;
+  session.markModified('draft');
   await session.save();
   await transition(session, STATES.BOOKING_RETURN_TIME);
-  await ctx.send.text('ask_return_time');
+  await promptTime(ctx, { returnTrip: true });
 }
 
 async function handleBookingReturnTime(ctx) {
   const { message, session } = ctx;
-  const time = dateParser.resolveTimePhrase(message.text || message.interactiveTitle);
+  const answer = readTimeAnswer(message);
+
+  if (answer.nav) {
+    await changeTimePage(ctx, answer, { returnTrip: true });
+    return;
+  }
+  if (answer.changeDate) {
+    delete session.draft._returnDatePage;
+    delete session.draft._returnTimePage;
+    session.markModified('draft');
+    await transition(session, STATES.BOOKING_RETURN_DATE);
+    await promptDate(ctx, { returnTrip: true });
+    return;
+  }
+
+  const time = answer.time;
   if (!time) {
-    await ctx.send.text('ask_return_time');
+    await promptTime(ctx, { returnTrip: true });
     return;
   }
   const dayjsDate = dayjs(session.draft._pendingReturnDate).tz(dateParser.TZ);
@@ -298,7 +423,9 @@ async function handleBookingReturnTime(ctx) {
     return;
   }
 
+  delete session.draft._returnTimePage;
   session.draft.returnAt = combined.toDate();
+  session.markModified('draft');
   await session.save();
   await showVehicleOptions(ctx);
 }
