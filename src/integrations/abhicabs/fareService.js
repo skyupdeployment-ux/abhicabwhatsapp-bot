@@ -59,13 +59,11 @@ async function getFareOptions({ tripType, pickup, drop, pickupAt, returnAt, rent
   }
 
   const prisma = getPrisma();
-  // supportedTripTypes is a Json column, so Prisma has no `has` filter for it —
-  // filter in JS. An empty list means "supports every trip type".
-  const allVehicles = await prisma.botVehicle.findMany({ where: { active: true } });
-  const vehicles = allVehicles.filter((v) => {
-    const types = Array.isArray(v.supportedTripTypes) ? v.supportedTripTypes : [];
-    return types.length === 0 || types.includes(tripType);
-  });
+  const allActive = await prisma.vehicle.findMany({ where: { active: true } });
+  // supportedTripTypes is a Json column, so filter in JS (Prisma's `has` only works on scalar lists).
+  const vehicles = allActive.filter(
+    (v) => Array.isArray(v.supportedTripTypes) && v.supportedTripTypes.includes(tripType)
+  );
   const distanceKm = drop ? await resolveDistanceKm(pickup, drop) : null; // Google road distance, see distanceService.js
   const days =
     tripType === 'ROUND_TRIP' && returnAt
