@@ -10,6 +10,7 @@ const { toNumbered, rememberOptions } = require('../numberedMenu');
 const { inr } = require('../../utils/format');
 const env = require('../../config/env');
 const { reverseGeocode } = require('../../integrations/abhicabs/geocodeService');
+const { searchPlaces } = require('../../integrations/abhicabs/placeSearchService');
 
 const TRIP_TYPES = [
   { id: 'TRIP_ONE_WAY', value: 'ONE_WAY', key: 'trip_one_way', number: 1, listLabel: 'One Way', description: 'Pickup to drop, single journey', aliases: ['one way', 'oneway'] },
@@ -45,16 +46,15 @@ async function startBooking(ctx) {
 }
 
 /**
- * Asks for the pickup or drop. The customer can type a place, or share a point on the
- * map (the 📎 → Location option, or the "Send location" button when it is switched on).
+ * Pickup question: WhatsApp's "Send location" button shares the customer's current
+ * location. Typing a place name still works.
  */
-async function askPlace(ctx, kind) {
+async function askPlace(ctx, kind = 'pickup') {
   const { language } = ctx;
   const question = t(language, kind === 'drop' ? 'ask_drop' : 'ask_pickup');
-  const hint = tOr(language, 'location_hint', 'Type the place name, or tap 📎 → Location to pick it on the map.');
-  const body = `${question}\n\n${hint}`;
 
-  if (env.LOCATION_REQUEST_BUTTON) {
+  if (kind === 'pickup' && env.LOCATION_REQUEST_BUTTON) {
+    const body = `${question}\n\n${tOr(language, 'pickup_button_hint', 'Tap the button to share your current location, or type the place name.')}`;
     try {
       await ctx.send.locationRequestRaw(body);
       return;
@@ -62,7 +62,20 @@ async function askPlace(ctx, kind) {
       logger.warn({ err: err.message }, '[booking] location button could not be sent, using plain text');
     }
   }
-  await ctx.send.raw(body);
+  const hint = tOr(language, 'location_hint', 'Type the place name, or tap 📎 → Location to pick it on the map.');
+  await ctx.send.raw(`${question}\n\n${hint}`);
+}
+
+/** Drop question: a "Search place" button; the customer then types the name and picks a match. */
+async function askDrop(ctx) {
+  const { language } = ctx;
+  const body = `${t(language, 'ask_drop')}\n\n${tOr(language, 'drop_search_hint', 'Tap Search place, type the name, and pick it from the matches.')}`;
+  try {
+    await ctx.send.buttonsRaw(body, [{ id: 'DROP_SEARCH', title: tOr(language, 'btn_search_place', '🔍 Search place') }]);
+  } catch (err) {
+    logger.warn({ err: err.message }, '[booking] search button could not be sent, using plain text');
+    await ctx.send.raw(`${t(language, 'ask_drop')}\n\n${tOr(language, 'drop_type_prompt', '🔍 Type the name of the place you are going to.')}`);
+  }
 }
 
 /** A shared pin may have no name. Give it a readable address (Google) or, failing that, its coordinates. */
@@ -144,33 +157,118 @@ async function handleBookingPickup(ctx) {
     await promptDate(ctx);
   } else {
     await transition(session, STATES.BOOKING_DROP);
-    await askPlace(ctx, 'drop');
+    await askDrop(ctx);
   }
 }
 
 // ── STEP 3: Drop (skipped for HOURLY) ───────────────────────────────
 
-async function handleBookingDrop(ctx) {
-  const { message, session } = ctx;
+const TYPE_PLACE_PROMPT = '🔍 Type the name of the place you are going to (for example Hebbal or Kempegowda Airport).';
 
-  let location;
-  if (message.location) {
-    location = await describePin(locationParser.fromWhatsAppLocationMessage(message.location));
-  } else if (message.text) {
-    location = locationParser.fromTypedText(message.text);
-    if (locationParser.isAmbiguous(location.address)) {
-      await ctx.send.text('location_ambiguous');
-      return;
-    }
-  } else {
-    await askPlace(ctx, 'drop');
-    return;
-  }
+/** Which suggestion did the customer tap? Works for a row id, or for a row that arrives as plain text. */
+function readPlaceChoice(message, options) {
+  const id = message.interactiveId || '';
+  const title = (message.text || message.interactiveTitle || '').trim();
 
+  if (id === 'PLACE_AGAIN' || /search again/i.test(title)) return { again: true };
+  if (id === 'PLACE_TYPED' || /use what i typed/i.test(title)) return { typed: true };
+  const m = /^PLACE_(\d)$/.exec(id);
+  if (m && options[Number(m[1])]) return { option: options[Number(m[1])] };
+
+  const plain = title.toLowerCase();
+  const byName = options.find((o) => plain && (plain === o.name.slice(0, 24).toLowerCase() || plain === o.name.toLowerCase()));
+  return byName ? { option: byName } : {};
+}
+
+async function finishDrop(ctx, location) {
+  const { session } = ctx;
   session.draft.drop = location;
+  delete session.draft._placeOptions;
+  delete session.draft._placeQuery;
+  session.markModified('draft');
   await session.save();
   await transition(session, STATES.BOOKING_DATE);
   await promptDate(ctx);
+}
+
+async function handleBookingDrop(ctx) {
+  const { message, session, language } = ctx;
+  const options = session.draft._placeOptions || [];
+  const title = (message.text || message.interactiveTitle || '').trim();
+
+  // A map pin shared with 📎 → Location
+  if (message.location) {
+    await finishDrop(ctx, await describePin(locationParser.fromWhatsAppLocationMessage(message.location)));
+    return;
+  }
+
+  // "Search place" button
+  if (message.interactiveId === 'DROP_SEARCH' || /^(🔍\s*)?search place$/i.test(title)) {
+    await ctx.send.raw(tOr(language, 'drop_type_prompt', TYPE_PLACE_PROMPT));
+    return;
+  }
+
+  // Picking one of the suggestions shown earlier
+  if (options.length) {
+    const choice = readPlaceChoice(message, options);
+    if (choice.option) {
+      await finishDrop(ctx, { address: choice.option.address, latitude: choice.option.latitude, longitude: choice.option.longitude });
+      return;
+    }
+    if (choice.again) {
+      delete session.draft._placeOptions;
+      session.markModified('draft');
+      await session.save();
+      await ctx.send.raw(tOr(language, 'drop_type_prompt', TYPE_PLACE_PROMPT));
+      return;
+    }
+    if (choice.typed) {
+      await finishDrop(ctx, locationParser.fromTypedText(session.draft._placeQuery || title));
+      return;
+    }
+  }
+
+  if (!title) {
+    await askDrop(ctx);
+    return;
+  }
+
+  // The customer typed a name: look it up and show the matches
+  const matches = await searchPlaces(title, { near: session.draft.pickup });
+  if (!matches.length) {
+    // No search result (or search not available): use the text as typed, as before
+    const typed = locationParser.fromTypedText(title);
+    if (locationParser.isAmbiguous(typed.address)) {
+      await ctx.send.text('location_ambiguous');
+      return;
+    }
+    await finishDrop(ctx, typed);
+    return;
+  }
+
+  session.draft._placeOptions = matches;
+  session.draft._placeQuery = title;
+  session.markModified('draft');
+  await session.save();
+
+  await ctx.send.listRaw(
+    tOr(language, 'drop_choose_body', 'Select your drop location'),
+    tOr(language, 'btn_select_place', 'Select place'),
+    [
+      {
+        title: tOr(language, 'drop_matches_title', 'Matches'),
+        rows: matches.map((m, i) => ({ id: `PLACE_${i}`, title: m.name.slice(0, 24), description: m.address.slice(0, 72) })),
+      },
+      {
+        title: tOr(language, 'date_section_more', 'More'),
+        rows: [
+          { id: 'PLACE_AGAIN', title: '🔍 Search again' },
+          { id: 'PLACE_TYPED', title: '✏️ Use what I typed', description: title.slice(0, 72) },
+        ],
+      },
+    ],
+    { header: tOr(language, 'drop_choose_header', '📍 Choose Drop') }
+  );
 }
 
 // ── STEP 4: Date (calendar list) ────────────────────────────────────
