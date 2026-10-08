@@ -202,6 +202,19 @@ async function markBookingPayLater(bookingId) {
 async function applyPaymentCaptured({ paymentId, razorpayPaymentId, amountPaise }) {
   const prisma = getPrisma();
 
+  const expected = await prisma.payment.findUnique({ where: { id: paymentId } });
+  if (!expected) return { alreadyCaptured: true };
+
+  // The verified amount MUST equal the amount we asked Razorpay to collect. Never confirm on a mismatch.
+  if (amountPaise != null && amountPaise !== expected.amount) {
+    console.error(`[payment] AMOUNT MISMATCH for ${paymentId}: expected ${expected.amount} paise, Razorpay reported ${amountPaise}. Not confirming.`);
+    await prisma.payment.updateMany({
+      where: { id: paymentId, status: { not: 'CAPTURED' } },
+      data: { status: 'AMOUNT_MISMATCH', razorpayPaymentId: razorpayPaymentId || null, failureReason: `expected ${expected.amount}, got ${amountPaise}` },
+    });
+    return { alreadyCaptured: false, mismatch: true };
+  }
+
   const flipped = await prisma.payment.updateMany({
     where: { id: paymentId, status: { not: 'CAPTURED' } },
     data: { status: 'CAPTURED', razorpayPaymentId: razorpayPaymentId || null, verifiedAt: new Date() },
@@ -210,10 +223,6 @@ async function applyPaymentCaptured({ paymentId, razorpayPaymentId, amountPaise 
 
   const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
   const paidRupees = Math.round((amountPaise ?? payment.amount) / 100);
-  if (amountPaise != null && amountPaise !== payment.amount) {
-    // eslint-disable-next-line no-console
-    console.warn(`[payment] amount mismatch for ${paymentId}: expected ${payment.amount} paise, Razorpay reported ${amountPaise}`);
-  }
 
   let booking = payment.bookingId ? await prisma.booking.findUnique({ where: { id: payment.bookingId } }) : null;
   if (booking) {
