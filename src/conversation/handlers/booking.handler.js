@@ -8,6 +8,8 @@ const { callTool } = require('../../integrations/ai/tools');
 const { logger } = require('../../config/logger');
 const { toNumbered, rememberOptions } = require('../numberedMenu');
 const { inr } = require('../../utils/format');
+const env = require('../../config/env');
+const { reverseGeocode } = require('../../integrations/abhicabs/geocodeService');
 
 const TRIP_TYPES = [
   { id: 'TRIP_ONE_WAY', value: 'ONE_WAY', key: 'trip_one_way', number: 1, listLabel: 'One Way', description: 'Pickup to drop, single journey', aliases: ['one way', 'oneway'] },
@@ -40,6 +42,37 @@ async function startBooking(ctx) {
   await session.save();
   await transition(session, STATES.BOOKING_TRIP_TYPE);
   await promptTripType(ctx);
+}
+
+/**
+ * Asks for the pickup or drop. The customer can type a place, or share a point on the
+ * map (the 📎 → Location option, or the "Send location" button when it is switched on).
+ */
+async function askPlace(ctx, kind) {
+  const { language } = ctx;
+  const question = t(language, kind === 'drop' ? 'ask_drop' : 'ask_pickup');
+  const hint = tOr(language, 'location_hint', 'Type the place name, or tap 📎 → Location to pick it on the map.');
+  const body = `${question}\n\n${hint}`;
+
+  if (env.LOCATION_REQUEST_BUTTON) {
+    try {
+      await ctx.send.locationRequestRaw(body);
+      return;
+    } catch (err) {
+      logger.warn({ err: err.message }, '[booking] location button could not be sent, using plain text');
+    }
+  }
+  await ctx.send.raw(body);
+}
+
+/** A shared pin may have no name. Give it a readable address (Google) or, failing that, its coordinates. */
+async function describePin(location) {
+  if (location.address) return location;
+  const address = await reverseGeocode(location.latitude, location.longitude);
+  return {
+    ...location,
+    address: address || `Pinned location (${Number(location.latitude).toFixed(5)}, ${Number(location.longitude).toFixed(5)})`,
+  };
 }
 
 // ── STEP 1: Trip type ──────────────────────────────────────────────
@@ -81,7 +114,7 @@ async function handleBookingTripType(ctx) {
 
   await session.save();
   await transition(session, STATES.BOOKING_PICKUP);
-  await ctx.send.text('ask_pickup');
+  await askPlace(ctx, 'pickup');
 }
 
 // ── STEP 2: Pickup ──────────────────────────────────────────────────
@@ -91,16 +124,15 @@ async function handleBookingPickup(ctx) {
 
   let location;
   if (message.location) {
-    location = locationParser.fromWhatsAppLocationMessage(message.location);
+    location = await describePin(locationParser.fromWhatsAppLocationMessage(message.location));
   } else if (message.text) {
     location = locationParser.fromTypedText(message.text);
+    if (locationParser.isAmbiguous(location.address)) {
+      await ctx.send.text('location_ambiguous');
+      return;
+    }
   } else {
-    await ctx.send.text('ask_pickup');
-    return;
-  }
-
-  if (locationParser.isAmbiguous(location.address)) {
-    await ctx.send.text('location_ambiguous');
+    await askPlace(ctx, 'pickup');
     return;
   }
 
@@ -112,7 +144,7 @@ async function handleBookingPickup(ctx) {
     await promptDate(ctx);
   } else {
     await transition(session, STATES.BOOKING_DROP);
-    await ctx.send.text('ask_drop');
+    await askPlace(ctx, 'drop');
   }
 }
 
@@ -123,16 +155,15 @@ async function handleBookingDrop(ctx) {
 
   let location;
   if (message.location) {
-    location = locationParser.fromWhatsAppLocationMessage(message.location);
+    location = await describePin(locationParser.fromWhatsAppLocationMessage(message.location));
   } else if (message.text) {
     location = locationParser.fromTypedText(message.text);
+    if (locationParser.isAmbiguous(location.address)) {
+      await ctx.send.text('location_ambiguous');
+      return;
+    }
   } else {
-    await ctx.send.text('ask_drop');
-    return;
-  }
-
-  if (locationParser.isAmbiguous(location.address)) {
-    await ctx.send.text('location_ambiguous');
+    await askPlace(ctx, 'drop');
     return;
   }
 
