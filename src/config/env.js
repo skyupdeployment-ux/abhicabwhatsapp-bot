@@ -35,6 +35,10 @@ const env = {
   // typed addresses fall back to a 50 km default and fares will be inaccurate.
   GOOGLE_MAPS_API_KEY: required('GOOGLE_MAPS_API_KEY'),
 
+  // Set to "true" to ask for pickup/drop with WhatsApp's "Send location" map button.
+  // Off by default: turn it on only after checking your MSG91 account delivers it.
+  LOCATION_REQUEST_BUTTON: required('LOCATION_REQUEST_BUTTON', 'false') === 'true',
+
   // "Partial Payment" = this percentage of the fare, paid now. The rest is due later.
   PARTIAL_PAYMENT_PERCENT: Math.min(99, Math.max(1, parseInt(required('PARTIAL_PAYMENT_PERCENT', '25'), 10) || 25)),
 
