@@ -14,9 +14,11 @@ async function getAvailableVehicles({ tripType }) {
   }
 
   const prisma = getPrisma();
-  const vehicles = await prisma.vehicle.findMany({
-    where: { active: true, supportedTripTypes: { has: tripType } },
-  });
+  const allActive = await prisma.vehicle.findMany({ where: { active: true } });
+  // supportedTripTypes is a Json column, so filter in JS (Prisma's `has` only works on scalar lists).
+  const vehicles = allActive.filter(
+    (v) => Array.isArray(v.supportedTripTypes) && v.supportedTripTypes.includes(tripType)
+  );
 
   return vehicles.map((v) => ({
     vehicleId: v.vehicleId,
