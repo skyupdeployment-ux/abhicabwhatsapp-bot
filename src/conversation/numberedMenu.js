@@ -52,8 +52,14 @@ async function rememberOptions(session, map) {
  */
 function resolveNumericSelection(session, message) {
   if (message.interactiveId) return null; // an actual tap always wins
-  const raw = (message.text || '').trim();
-  const match = raw.match(/^(\d{1,2})[.)]?$/);
+  const raw = (message.text || message.interactiveTitle || '').trim();
+
+  // 1) bare number: "1", "2)", " 3 ", "4."
+  let match = raw.match(/^(\d{1,2})[.)]?$/);
+  // 2) a tapped list row echoed back as text, e.g. "1\uFE0F\u20E3 12 Seater Tempo Trav" (emoji digit first)
+  if (!match) match = raw.match(/^(\d)\uFE0F?\u20E3/);
+  // 3) the same for rows numbered 10+, which are shown as "10. Name"
+  if (!match) match = raw.match(/^(\d{2})[.)]\s/);
   if (!match) return null;
 
   const map = session.pendingOptionsMap || {};
