@@ -10,10 +10,10 @@ const { toNumbered, rememberOptions } = require('../numberedMenu');
 const { inr } = require('../../utils/format');
 
 const TRIP_TYPES = [
-  { id: 'TRIP_ONE_WAY', value: 'ONE_WAY', key: 'trip_one_way', number: 1 },
-  { id: 'TRIP_ROUND_TRIP', value: 'ROUND_TRIP', key: 'trip_round_trip', number: 2 },
-  { id: 'TRIP_AIRPORT', value: 'AIRPORT', key: 'trip_airport', number: 3 },
-  { id: 'TRIP_HOURLY', value: 'HOURLY', key: 'trip_hourly', number: 4 },
+  { id: 'TRIP_ONE_WAY', value: 'ONE_WAY', key: 'trip_one_way', number: 1, listLabel: 'One Way', description: 'Pickup to drop, single journey', aliases: ['one way', 'oneway'] },
+  { id: 'TRIP_ROUND_TRIP', value: 'ROUND_TRIP', key: 'trip_round_trip', number: 2, listLabel: 'Round Trip', description: 'Go and return', aliases: ['round trip', 'roundtrip', 'round'] },
+  { id: 'TRIP_HOURLY', value: 'HOURLY', key: 'trip_hourly', number: 3, listLabel: 'Local', description: 'Hourly cab within the city', aliases: ['local', 'hourly', 'rental'] },
+  { id: 'TRIP_AIRPORT', value: 'AIRPORT', key: 'trip_airport', number: 4, listLabel: 'Airport', description: 'Airport pickup or drop', aliases: ['airport'] },
 ];
 
 /**
@@ -37,23 +37,27 @@ function tOr(language, key, fallback) {
 async function startBooking(ctx) {
   const { session } = ctx;
   session.resetDraft();
-  session.draft.tripType = 'ONE_WAY';
   await session.save();
-  await transition(session, STATES.BOOKING_PICKUP);
-  await ctx.send.text('ask_pickup');
+  await transition(session, STATES.BOOKING_TRIP_TYPE);
+  await promptTripType(ctx);
 }
 
 // ── STEP 1: Trip type ──────────────────────────────────────────────
 
 async function promptTripType(ctx) {
-  const items = TRIP_TYPES.map((tt) => ({ id: tt.id, number: tt.number, label: t(ctx.language, tt.key) }));
+  const items = TRIP_TYPES.map((tt) => ({
+    id: tt.id,
+    number: tt.number,
+    label: tOr(ctx.language, `trip_list_${tt.value.toLowerCase()}`, tt.listLabel),
+    description: tt.description,
+  }));
   const { rows, map } = toNumbered(items);
-  // The list button needs a SHORT label (max 20 chars). It used to reuse the
-  // question text, which got cut off as "What type of trip do".
+  // The list button needs a SHORT label (max 20 chars).
   await ctx.send.listRaw(
-    t(ctx.language, 'ask_trip_type'),
+    tOr(ctx.language, 'ask_trip_type', 'What type of trip do you need?'),
     tOr(ctx.language, 'btn_select_trip', 'Select Trip'),
-    [{ title: 'Trip Type', rows }]
+    [{ title: 'Trip Type', rows }],
+    { header: tOr(ctx.language, 'trip_header', '🚕 Select Trip Type') }
   );
   await rememberOptions(ctx.session, map);
 }
@@ -64,9 +68,9 @@ async function handleBookingTripType(ctx) {
 
   if (!picked) {
     // Allow free text like "one way" / natural language via nluRouter's entity hint.
-    const guess = TRIP_TYPES.find((tt) => (message.text || '').toLowerCase().includes(tt.value.toLowerCase().replace('_', ' ')));
+    const typed = (message.text || message.interactiveTitle || '').toLowerCase();
+    const guess = TRIP_TYPES.find((tt) => tt.aliases.some((a) => typed.includes(a)));
     if (!guess) {
-      await ctx.send.text('ask_trip_type');
       await promptTripType(ctx);
       return;
     }
