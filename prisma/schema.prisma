@@ -20,7 +20,7 @@ model Customer {
   updatedAt          DateTime @default(now())
 
   sessions       Session[]
-  botBookings    BotBooking[]
+  botBookings    Booking[]
   supportTickets SupportTicket[]
 
   @@map("bot_customers")
@@ -56,7 +56,7 @@ model Session {
   @@map("bot_sessions")
 }
 
-model BotVehicle {
+model Vehicle {
   id                    String   @id @default(uuid())
   vehicleId             String   @unique
   name                  String
@@ -78,7 +78,7 @@ model BotVehicle {
   @@map("bot_vehicles")
 }
 
-model BotBooking {
+model Booking {
   id              String   @id @default(uuid())
   bookingNumber   String   @unique
   channel         String   @default("WHATSAPP")
@@ -106,7 +106,7 @@ model BotBooking {
   liveLocation    Json?
 
   paymentId       String?  @unique
-  payment         BotPayment? @relation(fields: [paymentId], references: [id])
+  payment         Payment? @relation(fields: [paymentId], references: [id])
 
   cancellation    Json?
   invoiceUrl      String?
@@ -120,7 +120,7 @@ model BotBooking {
   @@map("bot_bookings")
 }
 
-model BotPayment {
+model Payment {
   id                 String   @id @default(uuid())
   bookingId          String?
 
@@ -141,7 +141,7 @@ model BotPayment {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @default(now())
 
-  booking             BotBooking?
+  booking             Booking?
 
   @@index([bookingId])
   @@map("bot_payments")
