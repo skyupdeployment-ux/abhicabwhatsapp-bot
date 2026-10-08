@@ -40,7 +40,7 @@ class FakePrismaClient {
     this.session = table(db.sessions, (d) => ({ id: uid(), language: null, previousState: null, draft: {}, activeBookingId: null, activePaymentId: null, pendingIdempotencyKey: null, pendingOptionsMap: {}, humanHandoff: false, handoffReason: null, lastMessageAt: new Date(), expiresAt: null, ...d }));
     this.booking = table(db.bookings, (d) => ({ id: uid(), status: 'CREATED', paymentId: null, createdAt: new Date(), ...d }), ['bookingNumber', 'idempotencyKey']);
     this.payment = table(db.payments, (d) => ({ id: uid(), razorpayPaymentId: null, status: 'CREATED', attempt: 1, verifiedAt: null, ...d }), ['razorpayOrderId', 'idempotencyKey']);
-    this.vehicle = { findMany: async ({ where }) => VEHICLES.filter((v) => v.active && v.supportedTripTypes.includes(where.supportedTripTypes.has)).map(clone) };
+    this.vehicle = { findMany: async ({ where }) => VEHICLES.filter((v) => v.active).map(clone) };
     this.processedMessage = { create: async ({ data }) => { if (db.processed.includes(data.whatsappMessageId)) throw uniq('whatsappMessageId'); db.processed.push(data.whatsappMessageId); } };
   }
   $on() {} async $connect() {} async $disconnect() {}
