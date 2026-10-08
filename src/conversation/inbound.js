@@ -29,6 +29,7 @@
  * inbound JSON your webhook logs show and it can be corrected in one pass.
  */
 function safeParseJSON(value) {
+  if (value && typeof value === 'object') return value; // already parsed
   if (!value || typeof value !== 'string') return null;
   try {
     return JSON.parse(value);
@@ -38,6 +39,7 @@ function safeParseJSON(value) {
 }
 
 function normalizeInboundMessage(msg91Payload) {
+  const { logger } = require('../config/logger');
   const base = {
     id: msg91Payload.uuid || msg91Payload.requestId || null,
     from: msg91Payload.customerNumber,
@@ -58,16 +60,35 @@ function normalizeInboundMessage(msg91Payload) {
   }
 
   // Interactive list/button reply (Meta's own nested shape, relayed as-is)
-  const interactive = safeParseJSON(msg91Payload.interactive);
-  if (interactive) {
-    if (interactive.type === 'button_reply' && interactive.button_reply) {
-      base.interactiveId = interactive.button_reply.id;
-      base.interactiveTitle = interactive.button_reply.title;
-    } else if (interactive.type === 'list_reply' && interactive.list_reply) {
-      base.interactiveId = interactive.list_reply.id;
-      base.interactiveTitle = interactive.list_reply.title;
+  const fromInteractive = (obj) => {
+    if (!obj) return false;
+    const lr = obj.list_reply || (obj.interactive && obj.interactive.list_reply);
+    const br = obj.button_reply || (obj.interactive && obj.interactive.button_reply);
+    const pick = lr || br;
+    if (pick && pick.id) {
+      base.interactiveId = pick.id;
+      base.interactiveTitle = pick.title || null;
+      return true;
     }
-    if (base.interactiveId) return base;
+    return false;
+  };
+  if (fromInteractive(safeParseJSON(msg91Payload.interactive))) return base;
+
+  // MSG91 also relays Meta's raw message array as a JSON string in `messages`
+  const rawMessages = safeParseJSON(msg91Payload.messages);
+  const firstRaw = Array.isArray(rawMessages) ? rawMessages[0] : rawMessages;
+  if (firstRaw) {
+    if (fromInteractive(firstRaw.interactive)) return base;
+    if (firstRaw.button && (firstRaw.button.payload || firstRaw.button.text)) {
+      base.interactiveId = firstRaw.button.payload || null;
+      base.interactiveTitle = firstRaw.button.text || null;
+      if (base.interactiveId) return base;
+    }
+    if (!msg91Payload.text && firstRaw.text && firstRaw.text.body) {
+      base.type = 'text';
+      base.text = String(firstRaw.text.body).trim();
+      return base;
+    }
   }
 
   // Location share
@@ -89,6 +110,9 @@ function normalizeInboundMessage(msg91Payload) {
     return base;
   }
 
+  if (!base.text && !base.interactiveId && !base.location) {
+    logger.warn({ payload: msg91Payload }, '[inbound] could not read a message out of this MSG91 payload');
+  }
   return base;
 }
 
