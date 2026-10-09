@@ -303,55 +303,86 @@ async function handleBookingDrop(ctx) {
  * following days, and an "Another date" row for anything else.
  * For the return date of a round trip, the list starts from the pickup day.
  */
+const dateRangeKey = (returnTrip) => (returnTrip ? '_returnDateRange' : '_dateRange');
+
+function dateBlocksFor(session, returnTrip) {
+  const from = returnTrip && session.draft.pickupAt ? session.draft.pickupAt : undefined;
+  return dateParser.getDateBlocks({ from });
+}
+
+/**
+ * Date picking in two quick taps, because a WhatsApp list holds at most 10 rows:
+ *   1) "Pick a date range"  — 9-day ranges from today to the end of NEXT month
+ *   2) the dates in that range (with a way back)
+ * Typing a date (25 Oct, 25/10, tomorrow) works at any time.
+ */
 async function promptDate(ctx, { returnTrip = false } = {}) {
   const { language, session } = ctx;
-  const page = session.draft[returnTrip ? '_returnDatePage' : '_datePage'] || 0;
-  const labels = {
-    today: tOr(language, 'date_today', 'Today'),
-    tomorrow: tOr(language, 'date_tomorrow', 'Tomorrow'),
-  };
-  const from = returnTrip && session.draft.pickupAt ? session.draft.pickupAt : undefined;
-  const { dateRows, moreRows } = dateParser.getDatePage({ page, from, labels });
+  const blocks = dateBlocksFor(session, returnTrip);
+  const picked = session.draft[dateRangeKey(returnTrip)];
+  const block = Number.isInteger(picked) ? blocks[picked] : null;
+
+  const header = returnTrip ? tOr(language, 'return_date_header', '📅 Return Date') : tOr(language, 'date_header', '📅 Pick a Date');
+  const question = returnTrip
+    ? tOr(language, 'ask_return_date_body', 'What date will you return?')
+    : tOr(language, 'ask_date_body', 'What date would you like to travel?');
+
+  if (!block) {
+    await ctx.send.listRaw(
+      question,
+      tOr(language, 'date_pick_button', 'Pick a date'),
+      [{ title: tOr(language, 'date_section_ranges', 'Choose dates'), rows: dateParser.getDateRangeRows(blocks) }],
+      { header, footer: tOr(language, 'date_range_footer', 'Pick a range, then the day. Or type a date, e.g. 25 Oct') }
+    );
+    return;
+  }
 
   await ctx.send.listRaw(
-    returnTrip
-      ? tOr(language, 'ask_return_date_body', 'What date will you return?')
-      : tOr(language, 'ask_date_body', 'What date would you like to travel?'),
+    `${question}\n*${dateParser.blockTitle(block)}*`,
     tOr(language, 'date_pick_button', 'Pick a date'),
-    [
-      { title: tOr(language, 'date_section_available', 'Available dates'), rows: dateRows },
-      ...(moreRows.length ? [{ title: tOr(language, 'date_section_more', 'More'), rows: moreRows }] : []),
-    ],
-    {
-      header: returnTrip ? tOr(language, 'return_date_header', '📅 Return Date') : tOr(language, 'date_header', '📅 Pick a Date'),
-      footer: tOr(language, 'date_footer', 'Scroll and pick a date, or type one (e.g. 25 Oct)'),
-    }
+    [{
+      title: tOr(language, 'date_section_available', 'Available dates'),
+      rows: dateParser.getDatesInBlock(block, {
+        today: tOr(language, 'date_today', 'Today'),
+        tomorrow: tOr(language, 'date_tomorrow', 'Tomorrow'),
+        back: tOr(language, 'date_other_dates', 'Other dates'),
+      }),
+    }],
+    { header, footer: tOr(language, 'date_footer', 'Scroll and pick a date, or type one (e.g. 25 Oct)') }
   );
 }
 
 /**
  * Reads the customer's date answer, whether they tapped a row or typed.
- * Returns { resolved } (a dayjs date), { nav: +1/-1 } for Next 7 days / Earlier dates,
+ * Returns { range: n } (a range was tapped), { backToRanges: true }, { resolved } (a dayjs date),
  * { other: true } for the old "Another date" row, or {} when it could not be understood.
  */
-function readDateAnswer(message) {
+function readDateAnswer(message, blocks) {
   const title = (message.text || message.interactiveTitle || '').trim();
+  const id = message.interactiveId || '';
 
-  if (message.interactiveId === 'DATE_NEXT' || /next\s*7\s*days/i.test(title)) return { nav: 1 };
-  if (message.interactiveId === 'DATE_PREV' || /earlier\s*dates/i.test(title)) return { nav: -1 };
-  if (message.interactiveId === 'DATE_OTHER' || /^another date$/i.test(title)) return { other: true };
+  const rangeMatch = /^DATERANGE_(\d+)$/.exec(id);
+  if (rangeMatch && blocks[Number(rangeMatch[1])]) return { range: Number(rangeMatch[1]) };
+  if (id === 'DATE_RANGES' || /^(⬅️\s*)?other dates$/i.test(title)) return { backToRanges: true };
+  if (id === 'DATE_OTHER' || /^another date$/i.test(title)) return { other: true };
 
-  const tapped = dateParser.parseDateReply(message.interactiveId);
+  // A tapped range can also arrive as plain text, e.g. "9 – 17 Oct" — compare with the ranges we offered.
+  const norm = (x) => String(x).replace(/\s+/g, ' ').trim().toLowerCase();
+  const byTitle = blocks.find((b) => title && norm(dateParser.blockTitle(b)) === norm(title));
+  if (byTitle) return { range: byTitle.index };
+
+  const tapped = dateParser.parseDateReply(id);
   // A tapped row can also arrive as plain text, e.g. "Today · Thu 08 Oct" or "Sat 10 Oct".
   const rowText = title.match(/[A-Za-z]{3}\s+(\d{1,2})\s+([A-Za-z]{3})\s*$/);
   const resolved = dateParser.resolveDatePhrase(tapped || (rowText ? `${rowText[1]} ${rowText[2]}` : title));
   return resolved ? { resolved } : {};
 }
 
-async function changeDatePage(ctx, answer, { returnTrip = false } = {}) {
+async function handleDateRangeAnswer(ctx, answer, { returnTrip = false } = {}) {
   const { session } = ctx;
-  const key = returnTrip ? '_returnDatePage' : '_datePage';
-  session.draft[key] = Math.max(0, (session.draft[key] || 0) + answer.nav);
+  const key = dateRangeKey(returnTrip);
+  if (answer.backToRanges) delete session.draft[key];
+  else session.draft[key] = answer.range;
   session.markModified('draft');
   await session.save();
   await promptDate(ctx, { returnTrip });
@@ -359,10 +390,10 @@ async function changeDatePage(ctx, answer, { returnTrip = false } = {}) {
 
 async function handleBookingDate(ctx) {
   const { message, session } = ctx;
-  const answer = readDateAnswer(message);
+  const answer = readDateAnswer(message, dateBlocksFor(session, false));
 
-  if (answer.nav) {
-    await changeDatePage(ctx, answer);
+  if (answer.range !== undefined || answer.backToRanges) {
+    await handleDateRangeAnswer(ctx, answer);
     return;
   }
 
@@ -385,7 +416,7 @@ async function handleBookingDate(ctx) {
   }
 
   session.draft._pendingDate = answer.resolved.toISOString(); // temp holder until time is combined
-  delete session.draft._datePage;
+  delete session.draft._dateRange;
   delete session.draft._timePage;
   session.markModified('draft');
   await session.save();
@@ -463,7 +494,7 @@ async function handleBookingTime(ctx) {
     return;
   }
   if (answer.changeDate) {
-    delete session.draft._datePage;
+    delete session.draft._dateRange;
     delete session.draft._timePage;
     session.markModified('draft');
     await transition(session, STATES.BOOKING_DATE);
@@ -513,10 +544,10 @@ async function handleBookingTime(ctx) {
 
 async function handleBookingReturnDate(ctx) {
   const { message, session } = ctx;
-  const answer = readDateAnswer(message);
+  const answer = readDateAnswer(message, dateBlocksFor(session, true));
 
-  if (answer.nav) {
-    await changeDatePage(ctx, answer, { returnTrip: true });
+  if (answer.range !== undefined || answer.backToRanges) {
+    await handleDateRangeAnswer(ctx, answer, { returnTrip: true });
     return;
   }
 
@@ -540,7 +571,7 @@ async function handleBookingReturnDate(ctx) {
   }
 
   session.draft._pendingReturnDate = answer.resolved.toISOString();
-  delete session.draft._returnDatePage;
+  delete session.draft._returnDateRange;
   delete session.draft._returnTimePage;
   session.markModified('draft');
   await session.save();
@@ -557,7 +588,7 @@ async function handleBookingReturnTime(ctx) {
     return;
   }
   if (answer.changeDate) {
-    delete session.draft._returnDatePage;
+    delete session.draft._returnDateRange;
     delete session.draft._returnTimePage;
     session.markModified('draft');
     await transition(session, STATES.BOOKING_RETURN_DATE);
