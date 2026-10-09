@@ -303,7 +303,13 @@ async function handleBookingDrop(ctx) {
  * following days, and an "Another date" row for anything else.
  * For the return date of a round trip, the list starts from the pickup day.
  */
+/** "Now: Fri 9 Oct 2026, 11:24 AM (IST)" — shown on the date step so the customer sees today's date and time. */
+function nowLine(language) {
+  return tOr(language, 'now_line', `🕒 Now: ${dateParser.now().format('ddd D MMM YYYY, h:mm A')} (IST)`);
+}
+
 const calMonthKey = (returnTrip) => (returnTrip ? '_returnCalMonth' : '_calMonth');
+const calWeekKey = (returnTrip) => (returnTrip ? '_returnCalWeek' : '_calWeek');
 
 function calendarFor(session, returnTrip) {
   const from = returnTrip && session.draft.pickupAt ? session.draft.pickupAt : undefined;
@@ -313,6 +319,84 @@ function calendarFor(session, returnTrip) {
   if (month.isAfter(bounds.lastMonth)) month = bounds.lastMonth;
   return { ...bounds, month };
 }
+
+/** What the tap-only picker shows right now: the months, the weeks of a month, or the days of a week. */
+function tapView(session, returnTrip, language) {
+  const { min, month } = calendarFor(session, returnTrip);
+  if (!dateParser.parseMonthKey(session.draft[calMonthKey(returnTrip)])) {
+    return { view: 'months', month, rows: dateParser.getMonthRows({ min }) };
+  }
+  const weeks = dateParser.getWeeksOfMonth({ month, min });
+  const idx = session.draft[calWeekKey(returnTrip)];
+  if (!Number.isInteger(idx) || !weeks[idx]) {
+    return { view: 'weeks', month, weeks, rows: dateParser.getWeekRows(weeks, { back: tOr(language, 'date_other_months', 'Other months') }) };
+  }
+  return {
+    view: 'dates',
+    month,
+    week: weeks[idx],
+    rows: dateParser.getDatesOfWeek(weeks[idx], {
+      today: tOr(language, 'date_today', 'Today'),
+      tomorrow: tOr(language, 'date_tomorrow', 'Tomorrow'),
+      back: tOr(language, 'date_other_weeks', 'Other weeks'),
+    }),
+  };
+}
+
+/** Tap-only calendar: month -> week -> day. Nothing to type; it runs on into next year. */
+async function promptTapDate(ctx, { returnTrip = false, question, header }) {
+  const { language, session } = ctx;
+  const v = tapView(session, returnTrip, language);
+  const button = tOr(language, 'date_pick_button', 'Pick a date');
+
+  if (v.view === 'months') {
+    await ctx.send.listRaw(
+      `${question}\\n${nowLine(language)}`,
+      button,
+      [{ title: tOr(language, 'date_section_months', 'Choose month'), rows: v.rows }],
+      { header, footer: tOr(language, 'date_taps_footer', 'Pick month, week, then day. Or type a date, e.g. 25 Oct') }
+    );
+    return;
+  }
+  if (v.view === 'weeks') {
+    await ctx.send.listRaw(
+      `${question}\\n*${v.month.format('MMMM YYYY')}*`,
+      button,
+      [{ title: tOr(language, 'date_section_weeks', 'Choose week'), rows: v.rows }],
+      { header, footer: tOr(language, 'date_taps_footer', 'Pick month, week, then day. Or type a date, e.g. 25 Oct') }
+    );
+    return;
+  }
+  await ctx.send.listRaw(
+    `${question}\\n*${v.week.first.format('D MMM')} – ${v.week.last.format('D MMM')}*`,
+    button,
+    [{ title: tOr(language, 'date_section_available', 'Available dates'), rows: v.rows }],
+    { header, footer: tOr(language, 'date_taps_footer', 'Pick month, week, then day. Or type a date, e.g. 25 Oct') }
+  );
+}
+
+/** Moves between the months / weeks / days views. */
+async function handleTapNav(ctx, answer, { returnTrip = false } = {}) {
+  const { session } = ctx;
+  const mk = calMonthKey(returnTrip);
+  const wk = calWeekKey(returnTrip);
+  if (answer.month) {
+    session.draft[mk] = answer.month;
+    delete session.draft[wk];
+  } else if (answer.week !== undefined) {
+    session.draft[wk] = answer.week;
+  } else if (answer.backMonths) {
+    delete session.draft[mk];
+    delete session.draft[wk];
+  } else if (answer.backWeeks) {
+    delete session.draft[wk];
+  }
+  session.markModified('draft');
+  await session.save();
+  await promptDate(ctx, { returnTrip });
+}
+
+const isTapNav = (a) => a.month || a.week !== undefined || a.backMonths || a.backWeeks;
 
 /**
  * Month calendar with ◀ / ▶ buttons that run on into the next months and years.
@@ -333,11 +417,33 @@ async function promptDate(ctx, { returnTrip = false } = {}) {
     `Type the day number (for example ${cal.firstAvailable || 15}) for ${cal.monthLabel}, or tap ◀ ▶ to change the month. A full date like 25 Dec 2026 also works.`
   );
 
+  // A real tap-a-date calendar (WhatsApp Flow) when one is set up; the text calendar is the fallback.
+  if (env.DATE_FLOW_ID) {
+    try {
+      await ctx.send.flowRaw({
+        header,
+        body: `${question}\n${nowLine(language)}\n\n${tOr(language, 'calendar_flow_hint', 'Tap the button to open the calendar, or just type a date (e.g. 25 Oct).')}`,
+        flowId: env.DATE_FLOW_ID,
+        cta: tOr(language, 'date_pick_button', 'Pick a date'),
+        screen: 'PICK_DATE',
+        data: { min_date: min.format('YYYY-MM-DD'), max_date: lastMonth.endOf('month').format('YYYY-MM-DD') },
+      });
+      return;
+    } catch (err) {
+      logger.warn({ err: err.message }, '[booking] calendar flow could not be sent, using the text calendar');
+    }
+  }
+
+  if (env.DATE_PICKER !== 'text') {
+    await promptTapDate(ctx, { returnTrip, question, header });
+    return;
+  }
+
   const buttons = [];
   if (cal.canPrev) buttons.push({ id: 'CAL_PREV', title: `◀ ${cal.prevLabel}` });
   if (cal.canNext) buttons.push({ id: 'CAL_NEXT', title: `${cal.nextLabel} ▶` });
 
-  await ctx.send.buttonsRaw(`*${header}*\n${question}\n\n\`\`\`\n${cal.text}\n\`\`\`\n${how}`, buttons);
+  await ctx.send.buttonsRaw(`*${header}*\n${question}\n${nowLine(language)}\n\n\`\`\`\n${cal.text}\n\`\`\`\n${how}`, buttons);
 }
 
 /**
@@ -345,12 +451,31 @@ async function promptDate(ctx, { returnTrip = false } = {}) {
  * Returns { move: ±1 } (◀ / ▶), { day: n } (a day number of the month shown), { resolved } (a dayjs date),
  * or {} when it could not be understood.
  */
-function readDateAnswer(message) {
+function readDateAnswer(message, rows = []) {
   const title = (message.text || message.interactiveTitle || '').trim();
-  const id = message.interactiveId || '';
+  let id = message.interactiveId || '';
+
+  // A tapped row can arrive as plain text: match it against the rows we just offered.
+  if (!id && title) {
+    const norm = (x) => String(x).replace(/\s+/g, ' ').trim().toLowerCase();
+    const hit = rows.find((r) => norm(r.title) === norm(title));
+    if (hit) id = hit.id;
+  }
+
+  const monthPick = /^CALMONTH_(\d{4}-\d{2})$/.exec(id);
+  if (monthPick) return { month: monthPick[1] };
+  const weekPick = /^CALWEEK_(\d+)$/.exec(id);
+  if (weekPick) return { week: Number(weekPick[1]) };
+  if (id === 'CAL_MONTHS') return { backMonths: true };
+  if (id === 'CAL_WEEKS') return { backWeeks: true };
 
   if (id === 'CAL_PREV' || /^◀/.test(title)) return { move: -1 };
   if (id === 'CAL_NEXT' || /▶$/.test(title)) return { move: 1 };
+  const flowDate = /^FLOWDATE_(\d{4}-\d{2}-\d{2})$/.exec(id);
+  if (flowDate) {
+    const picked = dateParser.resolveDatePhrase(flowDate[1]);
+    return picked ? { resolved: picked } : {};
+  }
   if (/^\d{1,2}$/.test(title)) return { day: Number(title) };
 
   const resolved = dateParser.resolveDatePhrase(dateParser.parseDateReply(id) || title);
@@ -387,7 +512,13 @@ async function handleCalendarAnswer(ctx, answer, { returnTrip = false } = {}) {
 
 async function handleBookingDate(ctx) {
   const { message, session } = ctx;
-  const answer = readDateAnswer(message);
+  const rows = env.DATE_PICKER === 'text' ? [] : tapView(session, false, ctx.language).rows;
+  const answer = readDateAnswer(message, rows);
+
+  if (isTapNav(answer)) {
+    await handleTapNav(ctx, answer);
+    return;
+  }
 
   let date = answer.resolved || null;
   if (answer.move || answer.day) {
@@ -408,6 +539,7 @@ async function handleBookingDate(ctx) {
 
   session.draft._pendingDate = date.toISOString(); // temp holder until time is combined
   delete session.draft._calMonth;
+  delete session.draft._calWeek;
   delete session.draft._timePage;
   session.markModified('draft');
   await session.save();
@@ -441,7 +573,7 @@ async function promptTime(ctx, { returnTrip = false } = {}) {
     : tOr(language, 'ask_time_body', 'What time should the cab arrive? (IST)');
 
   await ctx.send.listRaw(
-    `Great — *${date.format('dddd, D MMM YYYY')}*.\n\n${question}`,
+    `Great — *${date.format('dddd, D MMM YYYY')}*.\n\n${question}\n${tOr(language, 'now_time_line', `🕒 Now: ${dateParser.now().format('h:mm A')}`)}`,
     tOr(language, 'time_pick_button', 'Pick a time'),
     [
       { title: tOr(language, 'time_section_available', 'Available time slots'), rows: timeRows },
@@ -486,6 +618,7 @@ async function handleBookingTime(ctx) {
   }
   if (answer.changeDate) {
     delete session.draft._calMonth;
+  delete session.draft._calWeek;
     delete session.draft._timePage;
     session.markModified('draft');
     await transition(session, STATES.BOOKING_DATE);
@@ -535,7 +668,13 @@ async function handleBookingTime(ctx) {
 
 async function handleBookingReturnDate(ctx) {
   const { message, session } = ctx;
-  const answer = readDateAnswer(message);
+  const rows = env.DATE_PICKER === 'text' ? [] : tapView(session, true, ctx.language).rows;
+  const answer = readDateAnswer(message, rows);
+
+  if (isTapNav(answer)) {
+    await handleTapNav(ctx, answer, { returnTrip: true });
+    return;
+  }
 
   let date = answer.resolved || null;
   if (answer.move || answer.day) {
@@ -557,6 +696,7 @@ async function handleBookingReturnDate(ctx) {
 
   session.draft._pendingReturnDate = date.toISOString();
   delete session.draft._returnCalMonth;
+  delete session.draft._returnCalWeek;
   delete session.draft._returnTimePage;
   session.markModified('draft');
   await session.save();
@@ -574,6 +714,7 @@ async function handleBookingReturnTime(ctx) {
   }
   if (answer.changeDate) {
     delete session.draft._returnCalMonth;
+  delete session.draft._returnCalWeek;
     delete session.draft._returnTimePage;
     session.markModified('draft');
     await transition(session, STATES.BOOKING_RETURN_DATE);
