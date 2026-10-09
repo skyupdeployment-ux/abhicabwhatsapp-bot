@@ -46,24 +46,43 @@ async function startBooking(ctx) {
 }
 
 /**
- * Pickup question: WhatsApp's "Send location" button shares the customer's current
- * location. Typing a place name still works.
+ * Pickup question. It is a normal button message, so it shows on every device (phone, Web, Desktop):
+ *   [📍 Current location]  — then we ask for the location (see sendLocationPrompt)
+ * Typing a place name, or sharing a pin with 📎 → Location, also works at any time.
  */
 async function askPlace(ctx, kind = 'pickup') {
   const { language } = ctx;
   const question = t(language, kind === 'drop' ? 'ask_drop' : 'ask_pickup');
 
-  if (kind === 'pickup' && env.LOCATION_REQUEST_BUTTON) {
-    const body = `${question}\n\n${tOr(language, 'pickup_button_hint', 'Tap the button to share your current location, or type the place name.')}`;
+  if (kind === 'pickup') {
+    const body = `${question}\n\n${tOr(language, 'pickup_button_hint', 'Tap Current location to share where you are, or type the place name.')}`;
     try {
-      await ctx.send.locationRequestRaw(body);
+      await ctx.send.buttonsRaw(body, [{ id: 'PICKUP_CURRENT', title: tOr(language, 'btn_current_location', '📍 Current location') }]);
       return;
     } catch (err) {
-      logger.warn({ err: err.message }, '[booking] location button could not be sent, using plain text');
+      logger.warn({ err: err.message }, '[booking] pickup button could not be sent, using plain text');
     }
   }
   const hint = tOr(language, 'location_hint', 'Type the place name, or tap 📎 → Location to pick it on the map.');
   await ctx.send.raw(`${question}\n\n${hint}`);
+}
+
+/**
+ * The customer tapped "Current location". A plain text instruction always goes first (it shows
+ * everywhere); WhatsApp's "Send location" button follows as an extra when it is switched on.
+ * That button only appears on the phone app, so it must never be the only thing we send.
+ */
+async function sendLocationPrompt(ctx) {
+  await ctx.send.raw(
+    tOr(ctx.language, 'share_location_steps', '📍 Please share your current location:\ntap 📎 → Location → Send your current location.\n\nOr just type the place name.')
+  );
+  if (env.LOCATION_REQUEST_BUTTON) {
+    try {
+      await ctx.send.locationRequestRaw(tOr(ctx.language, 'share_location_button', 'Or tap the button below to share it.'));
+    } catch (err) {
+      logger.warn({ err: err.message }, '[booking] location button could not be sent');
+    }
+  }
 }
 
 /** Drop question: a "Search place" button; the customer then types the name and picks a match. */
@@ -134,6 +153,12 @@ async function handleBookingTripType(ctx) {
 
 async function handleBookingPickup(ctx) {
   const { message, session } = ctx;
+  const tapped = (message.text || message.interactiveTitle || '').trim();
+
+  if (message.interactiveId === 'PICKUP_CURRENT' || /^(📍\s*)?current location$/i.test(tapped)) {
+    await sendLocationPrompt(ctx);
+    return;
+  }
 
   let location;
   if (message.location) {
@@ -295,11 +320,11 @@ async function promptDate(ctx, { returnTrip = false } = {}) {
     tOr(language, 'date_pick_button', 'Pick a date'),
     [
       { title: tOr(language, 'date_section_available', 'Available dates'), rows: dateRows },
-      { title: tOr(language, 'date_section_more', 'More'), rows: moreRows },
+      ...(moreRows.length ? [{ title: tOr(language, 'date_section_more', 'More'), rows: moreRows }] : []),
     ],
     {
       header: returnTrip ? tOr(language, 'return_date_header', '📅 Return Date') : tOr(language, 'date_header', '📅 Pick a Date'),
-      footer: tOr(language, 'date_footer', 'Tap "Next 7 days" to see more, or type a date'),
+      footer: tOr(language, 'date_footer', 'Scroll and pick a date, or type one (e.g. 25 Oct)'),
     }
   );
 }
@@ -660,12 +685,11 @@ async function sendVehicleChoices(ctx) {
 
     const rows = categories.map((c, i) => {
       const g = groups.get(c);
-      const from = Math.min(...g.map((o) => o.fare.total));
       return {
         id: `CAT_${c}`,
         number: i + 1,
         label: tOr(language, `cab_category_${c}`, titleCase(c)),
-        description: `${g.length} option${g.length > 1 ? 's' : ''} · from ${inr(from)}`,
+        description: `${g.length} option${g.length > 1 ? 's' : ''}`,
       };
     });
     const { rows: numbered, map } = toNumbered(rows);
@@ -684,7 +708,7 @@ async function sendVehicleChoices(ctx) {
     number: i + 1,
     label: `${o.vehicleName}`.slice(0, 22),
     // The row title is cut off at 24 characters by WhatsApp, so the full name goes here too.
-    description: `${o.vehicleName} · ${o.seatingCapacity} seats · ${inr(o.fare.total)}`,
+    description: `${o.vehicleName} · ${o.seatingCapacity} seats`,
   }));
   const { rows: numbered, map } = toNumbered(rows);
   await ctx.send.listRaw(
