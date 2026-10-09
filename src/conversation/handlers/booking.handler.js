@@ -303,120 +303,111 @@ async function handleBookingDrop(ctx) {
  * following days, and an "Another date" row for anything else.
  * For the return date of a round trip, the list starts from the pickup day.
  */
-const dateRangeKey = (returnTrip) => (returnTrip ? '_returnDateRange' : '_dateRange');
+const calMonthKey = (returnTrip) => (returnTrip ? '_returnCalMonth' : '_calMonth');
 
-function dateBlocksFor(session, returnTrip) {
+function calendarFor(session, returnTrip) {
   const from = returnTrip && session.draft.pickupAt ? session.draft.pickupAt : undefined;
-  return dateParser.getDateBlocks({ from });
+  const bounds = dateParser.getCalendarBounds({ from });
+  let month = dateParser.parseMonthKey(session.draft[calMonthKey(returnTrip)]) || bounds.firstMonth;
+  if (month.isBefore(bounds.firstMonth)) month = bounds.firstMonth;
+  if (month.isAfter(bounds.lastMonth)) month = bounds.lastMonth;
+  return { ...bounds, month };
 }
 
 /**
- * Date picking in two quick taps, because a WhatsApp list holds at most 10 rows:
- *   1) "Pick a date range"  — 9-day ranges from today to the end of NEXT month
- *   2) the dates in that range (with a way back)
- * Typing a date (25 Oct, 25/10, tomorrow) works at any time.
+ * Month calendar with ◀ / ▶ buttons that run on into the next months and years.
+ * The customer types the day number for the month shown (e.g. 15), or a full date (25 Dec 2026).
  */
 async function promptDate(ctx, { returnTrip = false } = {}) {
   const { language, session } = ctx;
-  const blocks = dateBlocksFor(session, returnTrip);
-  const picked = session.draft[dateRangeKey(returnTrip)];
-  const block = Number.isInteger(picked) ? blocks[picked] : null;
+  const { min, month, lastMonth } = calendarFor(session, returnTrip);
+  const cal = dateParser.renderMonthCalendar({ month, min, lastMonth });
 
-  const header = returnTrip ? tOr(language, 'return_date_header', '📅 Return Date') : tOr(language, 'date_header', '📅 Pick a Date');
   const question = returnTrip
     ? tOr(language, 'ask_return_date_body', 'What date will you return?')
     : tOr(language, 'ask_date_body', 'What date would you like to travel?');
-
-  if (!block) {
-    await ctx.send.listRaw(
-      question,
-      tOr(language, 'date_pick_button', 'Pick a date'),
-      [{ title: tOr(language, 'date_section_ranges', 'Choose dates'), rows: dateParser.getDateRangeRows(blocks) }],
-      { header, footer: tOr(language, 'date_range_footer', 'Pick a range, then the day. Or type a date, e.g. 25 Oct') }
-    );
-    return;
-  }
-
-  await ctx.send.listRaw(
-    `${question}\n*${dateParser.blockTitle(block)}*`,
-    tOr(language, 'date_pick_button', 'Pick a date'),
-    [{
-      title: tOr(language, 'date_section_available', 'Available dates'),
-      rows: dateParser.getDatesInBlock(block, {
-        today: tOr(language, 'date_today', 'Today'),
-        tomorrow: tOr(language, 'date_tomorrow', 'Tomorrow'),
-        back: tOr(language, 'date_other_dates', 'Other dates'),
-      }),
-    }],
-    { header, footer: tOr(language, 'date_footer', 'Scroll and pick a date, or type one (e.g. 25 Oct)') }
+  const header = returnTrip ? tOr(language, 'return_date_header', '📅 Return Date') : tOr(language, 'date_header', '📅 Pick a Date');
+  const how = tOr(
+    language,
+    'calendar_how',
+    `Type the day number (for example ${cal.firstAvailable || 15}) for ${cal.monthLabel}, or tap ◀ ▶ to change the month. A full date like 25 Dec 2026 also works.`
   );
+
+  const buttons = [];
+  if (cal.canPrev) buttons.push({ id: 'CAL_PREV', title: `◀ ${cal.prevLabel}` });
+  if (cal.canNext) buttons.push({ id: 'CAL_NEXT', title: `${cal.nextLabel} ▶` });
+
+  await ctx.send.buttonsRaw(`*${header}*\n${question}\n\n\`\`\`\n${cal.text}\n\`\`\`\n${how}`, buttons);
 }
 
 /**
- * Reads the customer's date answer, whether they tapped a row or typed.
- * Returns { range: n } (a range was tapped), { backToRanges: true }, { resolved } (a dayjs date),
- * { other: true } for the old "Another date" row, or {} when it could not be understood.
+ * Reads the customer's date answer.
+ * Returns { move: ±1 } (◀ / ▶), { day: n } (a day number of the month shown), { resolved } (a dayjs date),
+ * or {} when it could not be understood.
  */
-function readDateAnswer(message, blocks) {
+function readDateAnswer(message) {
   const title = (message.text || message.interactiveTitle || '').trim();
   const id = message.interactiveId || '';
 
-  const rangeMatch = /^DATERANGE_(\d+)$/.exec(id);
-  if (rangeMatch && blocks[Number(rangeMatch[1])]) return { range: Number(rangeMatch[1]) };
-  if (id === 'DATE_RANGES' || /^(⬅️\s*)?other dates$/i.test(title)) return { backToRanges: true };
-  if (id === 'DATE_OTHER' || /^another date$/i.test(title)) return { other: true };
+  if (id === 'CAL_PREV' || /^◀/.test(title)) return { move: -1 };
+  if (id === 'CAL_NEXT' || /▶$/.test(title)) return { move: 1 };
+  if (/^\d{1,2}$/.test(title)) return { day: Number(title) };
 
-  // A tapped range can also arrive as plain text, e.g. "9 – 17 Oct" — compare with the ranges we offered.
-  const norm = (x) => String(x).replace(/\s+/g, ' ').trim().toLowerCase();
-  const byTitle = blocks.find((b) => title && norm(dateParser.blockTitle(b)) === norm(title));
-  if (byTitle) return { range: byTitle.index };
-
-  const tapped = dateParser.parseDateReply(id);
-  // A tapped row can also arrive as plain text, e.g. "Today · Thu 08 Oct" or "Sat 10 Oct".
-  const rowText = title.match(/[A-Za-z]{3}\s+(\d{1,2})\s+([A-Za-z]{3})\s*$/);
-  const resolved = dateParser.resolveDatePhrase(tapped || (rowText ? `${rowText[1]} ${rowText[2]}` : title));
+  const resolved = dateParser.resolveDatePhrase(dateParser.parseDateReply(id) || title);
   return resolved ? { resolved } : {};
 }
 
-async function handleDateRangeAnswer(ctx, answer, { returnTrip = false } = {}) {
+/** Handles ◀ / ▶ and a typed day number. Returns a dayjs date when a day was picked, otherwise null. */
+async function handleCalendarAnswer(ctx, answer, { returnTrip = false } = {}) {
   const { session } = ctx;
-  const key = dateRangeKey(returnTrip);
-  if (answer.backToRanges) delete session.draft[key];
-  else session.draft[key] = answer.range;
-  session.markModified('draft');
-  await session.save();
-  await promptDate(ctx, { returnTrip });
+  const cal = calendarFor(session, returnTrip);
+  const key = calMonthKey(returnTrip);
+
+  if (answer.move) {
+    const target = cal.month.add(answer.move, 'month');
+    const ok = !target.isBefore(cal.firstMonth) && !target.isAfter(cal.lastMonth);
+    session.draft[key] = (ok ? target : cal.month).format('YYYY-MM');
+    session.markModified('draft');
+    await session.save();
+    await promptDate(ctx, { returnTrip });
+    return null;
+  }
+
+  if (answer.day) {
+    const picked = answer.day <= cal.month.daysInMonth() ? cal.month.date(answer.day) : null;
+    if (picked && !picked.isBefore(cal.min)) return picked;
+    await ctx.send.raw(
+      tOr(ctx.language, 'calendar_day_unavailable', `${answer.day} is not available in ${cal.month.format('MMMM YYYY')}. Please pick another day.`)
+    );
+    await promptDate(ctx, { returnTrip });
+    return null;
+  }
+  return null;
 }
 
 async function handleBookingDate(ctx) {
   const { message, session } = ctx;
-  const answer = readDateAnswer(message, dateBlocksFor(session, false));
+  const answer = readDateAnswer(message);
 
-  if (answer.range !== undefined || answer.backToRanges) {
-    await handleDateRangeAnswer(ctx, answer);
-    return;
+  let date = answer.resolved || null;
+  if (answer.move || answer.day) {
+    date = await handleCalendarAnswer(ctx, answer);
+    if (!date) return;
   }
 
-  if (answer.other) {
-    await ctx.send.raw(
-      tOr(ctx.language, 'ask_date_typed', '📅 Please type the travel date, for example 25 October or 25/10.')
-    );
-    return;
-  }
-
-  if (!answer.resolved) {
+  if (!date) {
     await promptDate(ctx);
     return;
   }
 
-  if (answer.resolved.isBefore(dateParser.now().startOf('day'))) {
+  if (date.isBefore(dateParser.now().startOf('day'))) {
     await ctx.send.raw(tOr(ctx.language, 'date_in_past', 'That date has already passed. Please choose a date from today onwards.'));
     await promptDate(ctx);
     return;
   }
 
-  session.draft._pendingDate = answer.resolved.toISOString(); // temp holder until time is combined
-  delete session.draft._dateRange;
+  session.draft._pendingDate = date.toISOString(); // temp holder until time is combined
+  delete session.draft._calMonth;
   delete session.draft._timePage;
   session.markModified('draft');
   await session.save();
@@ -494,7 +485,7 @@ async function handleBookingTime(ctx) {
     return;
   }
   if (answer.changeDate) {
-    delete session.draft._dateRange;
+    delete session.draft._calMonth;
     delete session.draft._timePage;
     session.markModified('draft');
     await transition(session, STATES.BOOKING_DATE);
@@ -544,34 +535,28 @@ async function handleBookingTime(ctx) {
 
 async function handleBookingReturnDate(ctx) {
   const { message, session } = ctx;
-  const answer = readDateAnswer(message, dateBlocksFor(session, true));
+  const answer = readDateAnswer(message);
 
-  if (answer.range !== undefined || answer.backToRanges) {
-    await handleDateRangeAnswer(ctx, answer, { returnTrip: true });
-    return;
+  let date = answer.resolved || null;
+  if (answer.move || answer.day) {
+    date = await handleCalendarAnswer(ctx, answer, { returnTrip: true });
+    if (!date) return;
   }
 
-  if (answer.other) {
-    await ctx.send.raw(
-      tOr(ctx.language, 'ask_date_typed', '📅 Please type the travel date, for example 25 October or 25/10.')
-    );
-    return;
-  }
-
-  if (!answer.resolved) {
+  if (!date) {
     await promptDate(ctx, { returnTrip: true });
     return;
   }
 
   const pickupDay = session.draft.pickupAt ? dayjs(session.draft.pickupAt).tz(dateParser.TZ).startOf('day') : null;
-  if (answer.resolved.isBefore(dateParser.now().startOf('day')) || (pickupDay && answer.resolved.isBefore(pickupDay))) {
+  if (date.isBefore(dateParser.now().startOf('day')) || (pickupDay && date.isBefore(pickupDay))) {
     await ctx.send.raw(tOr(ctx.language, 'return_before_pickup', 'The return date cannot be before your pickup date. Please choose again.'));
     await promptDate(ctx, { returnTrip: true });
     return;
   }
 
-  session.draft._pendingReturnDate = answer.resolved.toISOString();
-  delete session.draft._returnDateRange;
+  session.draft._pendingReturnDate = date.toISOString();
+  delete session.draft._returnCalMonth;
   delete session.draft._returnTimePage;
   session.markModified('draft');
   await session.save();
@@ -588,7 +573,7 @@ async function handleBookingReturnTime(ctx) {
     return;
   }
   if (answer.changeDate) {
-    delete session.draft._returnDateRange;
+    delete session.draft._returnCalMonth;
     delete session.draft._returnTimePage;
     session.markModified('draft');
     await transition(session, STATES.BOOKING_RETURN_DATE);
