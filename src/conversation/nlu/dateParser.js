@@ -288,35 +288,67 @@ function parseDateReply(replyId) {
 // Date / time pickers: 7 items per page + "Next 7 days" / "More times" (WhatsApp list)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const DATES_PER_PAGE = 10; // WhatsApp lists hold at most 10 rows, so this is one full scrollable list
 const TIMES_PER_PAGE = 7;
 const SLOT_MINUTES = 30;     // gap between time slots
 const DAY_START_HOUR = 6;    // first slot shown for a future date (customers can still type any time)
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
-/** One page of dates. Row ids stay DATE_YYYY-MM-DD; navigation rows are DATE_NEXT / DATE_PREV. */
-function getDatePage({ page = 0, from, labels = {} } = {}) {
-  const L = { today: 'Today', tomorrow: 'Tomorrow', next: 'Next 7 days', earlier: 'Earlier dates', ...labels };
+const RANGE_DAYS = 9; // 9 dates + a "Other dates" row = 10 rows, WhatsApp's limit for one list
+
+/**
+ * Date ranges of 9 days each, starting today and running to the END OF NEXT MONTH
+ * (about 7 ranges). For a return trip, `from` is the pickup day.
+ */
+function getDateBlocks({ from } = {}) {
   const base = now().startOf('day');
   let start = from ? dayjs(from).tz(TZ).startOf('day') : base;
   if (start.isBefore(base)) start = base;
-  const first = start.add(Math.max(0, page) * DATES_PER_PAGE, 'day');
+  const lastDay = start.add(1, 'month').endOf('month').startOf('day'); // last day of next month
 
-  const dateRows = [];
-  for (let i = 0; i < DATES_PER_PAGE; i += 1) {
-    const d = first.add(i, 'day');
+  const blocks = [];
+  for (let first = start, i = 0; !first.isAfter(lastDay) && i < 9; first = first.add(RANGE_DAYS, 'day'), i += 1) {
+    let last = first.add(RANGE_DAYS - 1, 'day');
+    if (last.isAfter(lastDay)) last = lastDay;
+    blocks.push({ index: i, first, last });
+  }
+  return blocks;
+}
+
+function blockTitle(b) {
+  if (b.first.isSame(b.last, 'day')) return b.first.format('D MMM');
+  return b.first.month() === b.last.month()
+    ? `${b.first.format('D')} – ${b.last.format('D MMM')}`
+    : `${b.first.format('D MMM')} – ${b.last.format('D MMM')}`;
+}
+
+/** Rows for the "pick a range" list: "9 – 17 Oct", "18 – 26 Oct", ... "27 Nov – 30 Nov". */
+function getDateRangeRows(blocks) {
+  const today = now().startOf('day');
+  return blocks.map((b) => ({
+    id: `DATERANGE_${b.index}`,
+    title: blockTitle(b).slice(0, 24),
+    description: b.first.isSame(today, 'day')
+      ? 'Starting today'
+      : b.first.month() === b.last.month()
+        ? b.first.format('MMMM YYYY')
+        : `${b.first.format('MMM')} – ${b.last.format('MMM YYYY')}`,
+  }));
+}
+
+/** Rows for the dates inside one range, plus a way back. Row ids stay DATE_YYYY-MM-DD. */
+function getDatesInBlock(block, labels = {}) {
+  const L = { today: 'Today', tomorrow: 'Tomorrow', back: 'Other dates', ...labels };
+  const base = now().startOf('day');
+  const rows = [];
+  for (let d = block.first; !d.isAfter(block.last); d = d.add(1, 'day')) {
     const diff = d.diff(base, 'day');
     const label = d.format('ddd DD MMM'); // Thu 08 Oct
     const title = diff === 0 ? `${L.today} · ${label}` : diff === 1 ? `${L.tomorrow} · ${label}` : label;
-    dateRows.push({
-      id: `DATE_${d.format('YYYY-MM-DD')}`,
-      title: title.slice(0, 24),
-      description: d.format('dddd'), // Thursday
-    });
+    rows.push({ id: `DATE_${d.format('YYYY-MM-DD')}`, title: title.slice(0, 24), description: d.format('dddd') });
   }
-  const moreRows = []; // no "Next" row: the customer scrolls the list, or types a later date
-  return { dateRows, moreRows };
+  rows.push({ id: 'DATE_RANGES', title: `⬅️ ${L.back}`.slice(0, 24) });
+  return rows;
 }
 
 /**
@@ -388,7 +420,10 @@ module.exports = {
   getDateListRows,
   buildDateListMessage,
   parseDateReply,
-  getDatePage,
+  getDateBlocks,
+  blockTitle,
+  getDateRangeRows,
+  getDatesInBlock,
   getTimeSlots,
   getTimePage,
   parseTimeReply,
