@@ -294,61 +294,52 @@ const DAY_START_HOUR = 6;    // first slot shown for a future date (customers ca
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
-const RANGE_DAYS = 9; // 9 dates + a "Other dates" row = 10 rows, WhatsApp's limit for one list
+const CAL_MONTHS_AHEAD = 12; // how far ahead the calendar lets a customer go
+
+/** Earliest allowed day, the first month shown, and the last month the arrows can reach. */
+function getCalendarBounds({ from } = {}) {
+  const base = now().startOf('day');
+  let min = from ? dayjs(from).tz(TZ).startOf('day') : base;
+  if (min.isBefore(base)) min = base;
+  const firstMonth = min.startOf('month');
+  return { min, firstMonth, lastMonth: firstMonth.add(CAL_MONTHS_AHEAD, 'month') };
+}
+
+/** 'YYYY-MM' -> first day of that month (India time). */
+function parseMonthKey(key) {
+  const m = /^(\d{4})-(\d{2})$/.exec(key || '');
+  return m ? dayjs.tz(`${m[1]}-${m[2]}-01`, TZ).startOf('day') : null;
+}
 
 /**
- * Date ranges of 9 days each, starting today and running to the END OF NEXT MONTH
- * (about 7 ranges). For a return trip, `from` is the pickup day.
+ * A text calendar for WhatsApp (shown in monospace). Days before `min` show as ··.
+ * The month can move with the ◀ / ▶ buttons, running on into the next month and year.
  */
-function getDateBlocks({ from } = {}) {
-  const base = now().startOf('day');
-  let start = from ? dayjs(from).tz(TZ).startOf('day') : base;
-  if (start.isBefore(base)) start = base;
-  const lastDay = start.add(1, 'month').endOf('month').startOf('day'); // last day of next month
-
-  const blocks = [];
-  for (let first = start, i = 0; !first.isAfter(lastDay) && i < 9; first = first.add(RANGE_DAYS, 'day'), i += 1) {
-    let last = first.add(RANGE_DAYS - 1, 'day');
-    if (last.isAfter(lastDay)) last = lastDay;
-    blocks.push({ index: i, first, last });
+function renderMonthCalendar({ month, min, lastMonth }) {
+  const first = month.startOf('month');
+  const lines = [`   ${first.format('MMMM YYYY')}`, 'Su Mo Tu We Th Fr Sa'];
+  let row = new Array(first.day()).fill('  '); // Sunday-first, like an Indian wall calendar
+  let firstAvailable = null;
+  for (let d = 1; d <= first.daysInMonth(); d += 1) {
+    const day = first.date(d);
+    const unavailable = day.isBefore(min);
+    if (!unavailable && firstAvailable === null) firstAvailable = d;
+    row.push(unavailable ? '··' : String(d).padStart(2, ' '));
+    if (row.length === 7) { lines.push(row.join(' ')); row = []; }
   }
-  return blocks;
-}
+  if (row.length) lines.push(row.join(' '));
 
-function blockTitle(b) {
-  if (b.first.isSame(b.last, 'day')) return b.first.format('D MMM');
-  return b.first.month() === b.last.month()
-    ? `${b.first.format('D')} – ${b.last.format('D MMM')}`
-    : `${b.first.format('D MMM')} – ${b.last.format('D MMM')}`;
-}
-
-/** Rows for the "pick a range" list: "9 – 17 Oct", "18 – 26 Oct", ... "27 Nov – 30 Nov". */
-function getDateRangeRows(blocks) {
-  const today = now().startOf('day');
-  return blocks.map((b) => ({
-    id: `DATERANGE_${b.index}`,
-    title: blockTitle(b).slice(0, 24),
-    description: b.first.isSame(today, 'day')
-      ? 'Starting today'
-      : b.first.month() === b.last.month()
-        ? b.first.format('MMMM YYYY')
-        : `${b.first.format('MMM')} – ${b.last.format('MMM YYYY')}`,
-  }));
-}
-
-/** Rows for the dates inside one range, plus a way back. Row ids stay DATE_YYYY-MM-DD. */
-function getDatesInBlock(block, labels = {}) {
-  const L = { today: 'Today', tomorrow: 'Tomorrow', back: 'Other dates', ...labels };
-  const base = now().startOf('day');
-  const rows = [];
-  for (let d = block.first; !d.isAfter(block.last); d = d.add(1, 'day')) {
-    const diff = d.diff(base, 'day');
-    const label = d.format('ddd DD MMM'); // Thu 08 Oct
-    const title = diff === 0 ? `${L.today} · ${label}` : diff === 1 ? `${L.tomorrow} · ${label}` : label;
-    rows.push({ id: `DATE_${d.format('YYYY-MM-DD')}`, title: title.slice(0, 24), description: d.format('dddd') });
-  }
-  rows.push({ id: 'DATE_RANGES', title: `⬅️ ${L.back}`.slice(0, 24) });
-  return rows;
+  const prev = first.subtract(1, 'month');
+  const next = first.add(1, 'month');
+  return {
+    text: lines.join('\n'),
+    monthLabel: first.format('MMMM YYYY'),
+    firstAvailable,
+    canPrev: !prev.isBefore(min.startOf('month')),
+    canNext: !next.isAfter(lastMonth),
+    prevLabel: prev.format('MMM YYYY'),
+    nextLabel: next.format('MMM YYYY'),
+  };
 }
 
 /**
@@ -420,10 +411,9 @@ module.exports = {
   getDateListRows,
   buildDateListMessage,
   parseDateReply,
-  getDateBlocks,
-  blockTitle,
-  getDateRangeRows,
-  getDatesInBlock,
+  getCalendarBounds,
+  parseMonthKey,
+  renderMonthCalendar,
   getTimeSlots,
   getTimePage,
   parseTimeReply,
