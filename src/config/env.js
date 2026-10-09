@@ -35,6 +35,13 @@ const env = {
   // typed addresses fall back to a 50 km default and fares will be inaccurate.
   GOOGLE_MAPS_API_KEY: required('GOOGLE_MAPS_API_KEY'),
 
+  // WhatsApp Flow with a real calendar (tap a date). Leave empty to use the text calendar.
+  // See date-calendar-flow.json for the Flow to create in WhatsApp Manager.
+  DATE_FLOW_ID: required('DATE_FLOW_ID', ''),
+
+  // Without a Flow: "taps" (default) = tap month, week, day in lists; "text" = text calendar, type the day number.
+  DATE_PICKER: required('DATE_PICKER', 'taps'),
+
   // The pickup question shows WhatsApp's "Send location" button (current location).
   // Set LOCATION_REQUEST_BUTTON=false to fall back to a plain typed question.
   LOCATION_REQUEST_BUTTON: required('LOCATION_REQUEST_BUTTON', 'true') !== 'false',
