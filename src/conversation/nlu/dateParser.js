@@ -288,7 +288,7 @@ function parseDateReply(replyId) {
 // Date / time pickers: 7 items per page + "Next 7 days" / "More times" (WhatsApp list)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const DATES_PER_PAGE = 7;
+const DATES_PER_PAGE = 10; // WhatsApp lists hold at most 10 rows, so this is one full scrollable list
 const TIMES_PER_PAGE = 7;
 const SLOT_MINUTES = 30;     // gap between time slots
 const DAY_START_HOUR = 6;    // first slot shown for a future date (customers can still type any time)
@@ -315,9 +315,7 @@ function getDatePage({ page = 0, from, labels = {} } = {}) {
       description: d.format('dddd'), // Thursday
     });
   }
-  const moreRows = [];
-  if (page > 0) moreRows.push({ id: 'DATE_PREV', title: `⬅️ ${L.earlier}`.slice(0, 24) });
-  moreRows.push({ id: 'DATE_NEXT', title: `➡️ ${L.next}`.slice(0, 24) });
+  const moreRows = []; // no "Next" row: the customer scrolls the list, or types a later date
   return { dateRows, moreRows };
 }
 
