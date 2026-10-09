@@ -342,6 +342,67 @@ function renderMonthCalendar({ month, min, lastMonth }) {
   };
 }
 
+
+// ── Tap-only date picker (WhatsApp lists): month -> week -> day ─────────────
+const MONTH_ROWS = 10; // a list holds at most 10 rows
+
+/** Rows for the "pick a month" list, starting with the month of `min` and running on into next year. */
+function getMonthRows({ min, count = MONTH_ROWS }) {
+  const first = min.startOf('month');
+  const rows = [];
+  for (let i = 0; i < count; i += 1) {
+    const m = first.add(i, 'month');
+    rows.push({
+      id: `CALMONTH_${m.format('YYYY-MM')}`,
+      title: m.format('MMMM YYYY'),
+      description: i === 0 ? `From ${min.format('ddd D MMM')}` : `${m.daysInMonth()} days`,
+    });
+  }
+  return rows;
+}
+
+/** Calendar weeks (Sunday to Saturday) of a month, cut at the month's ends and at `min`. */
+function getWeeksOfMonth({ month, min }) {
+  const first = month.startOf('month');
+  const last = month.endOf('month').startOf('day');
+  const weeks = [];
+  let start = first;
+  while (!start.isAfter(last)) {
+    let end = start.add(6 - start.day(), 'day'); // the Saturday
+    if (end.isAfter(last)) end = last;
+    if (!end.isBefore(min)) {
+      weeks.push({ index: weeks.length, first: start.isBefore(min) ? min : start, last: end });
+    }
+    start = end.add(1, 'day');
+  }
+  return weeks;
+}
+
+function getWeekRows(weeks, labels = {}) {
+  const L = { back: 'Other months', ...labels };
+  const rows = weeks.map((w) => ({
+    id: `CALWEEK_${w.index}`,
+    title: (w.first.isSame(w.last, 'day') ? w.first.format('D MMM') : `${w.first.format('D')} – ${w.last.format('D MMM')}`).slice(0, 24),
+    description: w.first.isSame(w.last, 'day') ? w.first.format('dddd') : `${w.first.format('ddd D')} – ${w.last.format('ddd D')}`,
+  }));
+  rows.push({ id: 'CAL_MONTHS', title: `⬅️ ${L.back}`.slice(0, 24) });
+  return rows;
+}
+
+function getDatesOfWeek(week, labels = {}) {
+  const L = { today: 'Today', tomorrow: 'Tomorrow', back: 'Other weeks', ...labels };
+  const base = now().startOf('day');
+  const rows = [];
+  for (let d = week.first; !d.isAfter(week.last); d = d.add(1, 'day')) {
+    const diff = d.diff(base, 'day');
+    const label = d.format('ddd DD MMM'); // Thu 08 Oct
+    const title = diff === 0 ? `${L.today} · ${label}` : diff === 1 ? `${L.tomorrow} · ${label}` : label;
+    rows.push({ id: `DATE_${d.format('YYYY-MM-DD')}`, title: title.slice(0, 24), description: d.format('dddd') });
+  }
+  rows.push({ id: 'CAL_WEEKS', title: `⬅️ ${L.back}`.slice(0, 24) });
+  return rows;
+}
+
 /**
  * All pickup-time slots (minutes since midnight) for `date`.
  * Today starts at the next slot after the current time; a later day starts at DAY_START_HOUR.
@@ -414,6 +475,10 @@ module.exports = {
   getCalendarBounds,
   parseMonthKey,
   renderMonthCalendar,
+  getMonthRows,
+  getWeeksOfMonth,
+  getWeekRows,
+  getDatesOfWeek,
   getTimeSlots,
   getTimePage,
   parseTimeReply,
