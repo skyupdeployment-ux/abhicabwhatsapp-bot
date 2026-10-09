@@ -11,6 +11,7 @@ const { inr } = require('../../utils/format');
 const env = require('../../config/env');
 const { reverseGeocode } = require('../../integrations/abhicabs/geocodeService');
 const { searchPlaces } = require('../../integrations/abhicabs/placeSearchService');
+const calendarLink = require('../../utils/calendarLink');
 
 const TRIP_TYPES = [
   { id: 'TRIP_ONE_WAY', value: 'ONE_WAY', key: 'trip_one_way', number: 1, listLabel: 'One Way', description: 'Pickup to drop, single journey', aliases: ['one way', 'oneway'] },
@@ -351,7 +352,7 @@ async function promptTapDate(ctx, { returnTrip = false, question, header }) {
 
   if (v.view === 'months') {
     await ctx.send.listRaw(
-      `${question}\\n${nowLine(language)}`,
+      `${question}\n${nowLine(language)}`,
       button,
       [{ title: tOr(language, 'date_section_months', 'Choose month'), rows: v.rows }],
       { header, footer: tOr(language, 'date_taps_footer', 'Pick month, week, then day. Or type a date, e.g. 25 Oct') }
@@ -360,7 +361,7 @@ async function promptTapDate(ctx, { returnTrip = false, question, header }) {
   }
   if (v.view === 'weeks') {
     await ctx.send.listRaw(
-      `${question}\\n*${v.month.format('MMMM YYYY')}*`,
+      `${question}\n*${v.month.format('MMMM YYYY')}*`,
       button,
       [{ title: tOr(language, 'date_section_weeks', 'Choose week'), rows: v.rows }],
       { header, footer: tOr(language, 'date_taps_footer', 'Pick month, week, then day. Or type a date, e.g. 25 Oct') }
@@ -368,7 +369,7 @@ async function promptTapDate(ctx, { returnTrip = false, question, header }) {
     return;
   }
   await ctx.send.listRaw(
-    `${question}\\n*${v.week.first.format('D MMM')} – ${v.week.last.format('D MMM')}*`,
+    `${question}\n*${v.week.first.format('D MMM')} – ${v.week.last.format('D MMM')}*`,
     button,
     [{ title: tOr(language, 'date_section_available', 'Available dates'), rows: v.rows }],
     { header, footer: tOr(language, 'date_taps_footer', 'Pick month, week, then day. Or type a date, e.g. 25 Oct') }
@@ -432,6 +433,20 @@ async function promptDate(ctx, { returnTrip = false } = {}) {
     } catch (err) {
       logger.warn({ err: err.message }, '[booking] calendar flow could not be sent, using the text calendar');
     }
+  }
+
+  // A link that opens a real tap-a-date calendar page (needs PUBLIC_BASE_URL); falls through to the lists if it is not set up.
+  if (env.DATE_PICKER === 'link' && calendarLink.enabled()) {
+    const token = calendarLink.createToken({
+      number: session.whatsappNumber,
+      min: min.format('YYYY-MM-DD'),
+      max: lastMonth.endOf('month').format('YYYY-MM-DD'),
+      returnTrip,
+    });
+    await ctx.send.raw(
+      `*${header}*\n${question}\n${nowLine(language)}\n\n${tOr(language, 'calendar_link_hint', 'Tap the link to open the calendar and pick your date:')}\n${calendarLink.linkFor(token)}\n\n${tOr(language, 'calendar_link_type', 'Or just type a date, e.g. 25 Oct.')}`
+    );
+    return;
   }
 
   if (env.DATE_PICKER !== 'text') {
