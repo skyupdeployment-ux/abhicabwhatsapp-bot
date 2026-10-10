@@ -38,9 +38,20 @@ const env = {
   // WhatsApp Flow with a real calendar (tap a date). Leave empty to use the text calendar.
   // See date-calendar-flow.json for the Flow to create in WhatsApp Manager.
   DATE_FLOW_ID: required('DATE_FLOW_ID', ''),
+  // true = the Flow also has a time dropdown (use date-time-calendar-flow.json); false = date only.
+  DATE_FLOW_TIME: required('DATE_FLOW_TIME', 'false') === 'true',
 
-  // Without a Flow: "taps" (default) = tap month, week, day in lists; "text" = text calendar, type the day number.
+  // Public https address of this server (no trailing slash), used for the calendar page link.
+  PUBLIC_BASE_URL: required('PUBLIC_BASE_URL', ''),
+  // Signs calendar links. Optional: MSG91_WEBHOOK_SECRET is used when this is empty.
+  CALENDAR_LINK_SECRET: required('CALENDAR_LINK_SECRET', ''),
+
+  // Without a Flow: "link" = tap a link that opens a real calendar page;
+  // "taps" (default) = tap month, week, day in lists; "text" = text calendar, type the day number.
   DATE_PICKER: required('DATE_PICKER', 'taps'),
+
+  // Optional "lat,lng" the place search leans towards when there is no pickup yet (e.g. 12.9716,77.5946).
+  PLACE_SEARCH_NEAR: required('PLACE_SEARCH_NEAR', ''),
 
   // The pickup question shows WhatsApp's "Send location" button (current location).
   // Set LOCATION_REQUEST_BUTTON=false to fall back to a plain typed question.
