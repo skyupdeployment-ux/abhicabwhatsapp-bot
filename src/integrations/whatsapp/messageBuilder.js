@@ -126,4 +126,41 @@ async function sendLocationRequest(to, bodyText) {
   });
 }
 
-module.exports = { sendText, sendButtons, sendList, sendDocument, sendLocationRequest };
+/**
+ * A WhatsApp Flow message (e.g. the tap-a-date calendar). The Flow must be PUBLISHED in the same
+ * WhatsApp Business Account as the sending number. Flows only open in the WhatsApp phone apps.
+ */
+async function sendFlow(to, { header, body, footer, flowId, cta, screen, data, token }) {
+  return sendMessage({
+    to,
+    type: 'interactive',
+    interactive: {
+      type: 'flow',
+      ...(header ? { header: { type: 'text', text: clamp(header, LIMIT.HEADER) } } : {}),
+      body: { text: clamp(body, LIMIT.INT_BODY) },
+      ...(footer ? { footer: { text: clamp(footer, LIMIT.FOOTER) } } : {}),
+      action: {
+        name: 'flow',
+        parameters: {
+          flow_message_version: '3',
+          flow_token: token || 'abhicabs-date',
+          flow_id: String(flowId),
+          flow_cta: clamp(cta, LIMIT.BTN_LABEL),
+          flow_action: 'navigate',
+          flow_action_payload: { screen, data },
+        },
+      },
+    },
+  });
+}
+
+/** A map card: WhatsApp shows the place on a small map with its name and address. */
+async function sendLocation(to, { latitude, longitude, name, address }) {
+  return sendMessage({
+    to,
+    type: 'location',
+    location: { latitude, longitude, name: clamp(name || '', 100), address: clamp(address || '', 200) },
+  });
+}
+
+module.exports = { sendText, sendButtons, sendList, sendDocument, sendLocationRequest, sendFlow, sendLocation };
