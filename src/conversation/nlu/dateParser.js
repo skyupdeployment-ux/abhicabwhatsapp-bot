@@ -440,7 +440,7 @@ function partOfDay(hour) {
 }
 
 /** One page of time slots plus the navigation rows (More times / Earlier times / Change date). */
-function getTimePage({ slots, page = 0, labels = {} }) {
+function getTimePage({ slots, page = 0, labels = {}, nowLabel = null }) {
   const L = { more: 'More times', earlier: 'Earlier times', change: 'Change date', ...labels };
   const slice = slots.slice(page * TIMES_PER_PAGE, (page + 1) * TIMES_PER_PAGE);
   const timeRows = slice.map((m) => ({
@@ -448,6 +448,8 @@ function getTimePage({ slots, page = 0, labels = {} }) {
     title: formatSlot(m),
     description: partOfDay(Math.floor(m / 60)),
   }));
+  // First page of today: the exact current time as the first choice.
+  if (nowLabel && page === 0) timeRows.unshift({ id: 'TIME_NOW', title: `Now · ${nowLabel}`.slice(0, 24), description: 'Current time' });
   const moreRows = [];
   if (page > 0) moreRows.push({ id: 'TIME_EARLIER', title: `⬅️ ${L.earlier}`.slice(0, 24) });
   if ((page + 1) * TIMES_PER_PAGE < slots.length) moreRows.push({ id: 'TIME_MORE', title: `➡️ ${L.more}`.slice(0, 24) });
