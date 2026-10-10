@@ -50,6 +50,9 @@ const env = {
   // "taps" (default) = tap month, week, day in lists; "text" = text calendar, type the day number.
   DATE_PICKER: required('DATE_PICKER', 'taps'),
 
+  // Show a small map card of the place the customer picks from the search results (false = off).
+  PLACE_MAP_CARD: required('PLACE_MAP_CARD', 'true') !== 'false',
+
   // Optional "lat,lng" the place search leans towards when there is no pickup yet (e.g. 12.9716,77.5946).
   PLACE_SEARCH_NEAR: required('PLACE_SEARCH_NEAR', ''),
 
