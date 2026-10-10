@@ -56,9 +56,12 @@ async function askPlace(ctx, kind = 'pickup') {
   const question = t(language, kind === 'drop' ? 'ask_drop' : 'ask_pickup');
 
   if (kind === 'pickup') {
-    const body = `${question}\n\n${tOr(language, 'pickup_button_hint', 'Tap Current location to share where you are, or type the place name.')}`;
+    const body = `${question}\n\n${tOr(language, 'pickup_button_hint', 'Tap Current location to share where you are, or Search place to find it by name.')}`;
     try {
-      await ctx.send.buttonsRaw(body, [{ id: 'PICKUP_CURRENT', title: tOr(language, 'btn_current_location', '📍 Current location') }]);
+      await ctx.send.buttonsRaw(body, [
+        { id: 'PICKUP_CURRENT', title: tOr(language, 'btn_current_location', '📍 Current location') },
+        { id: 'PICKUP_SEARCH', title: tOr(language, 'btn_search_place', '🔍 Search place') },
+      ]);
       return;
     } catch (err) {
       logger.warn({ err: err.message }, '[booking] pickup button could not be sent, using plain text');
@@ -152,30 +155,12 @@ async function handleBookingTripType(ctx) {
 
 // ── STEP 2: Pickup ──────────────────────────────────────────────────
 
-async function handleBookingPickup(ctx) {
-  const { message, session } = ctx;
-  const tapped = (message.text || message.interactiveTitle || '').trim();
-
-  if (message.interactiveId === 'PICKUP_CURRENT' || /^(📍\s*)?current location$/i.test(tapped)) {
-    await sendLocationPrompt(ctx);
-    return;
-  }
-
-  let location;
-  if (message.location) {
-    location = await describePin(locationParser.fromWhatsAppLocationMessage(message.location));
-  } else if (message.text) {
-    location = locationParser.fromTypedText(message.text);
-    if (locationParser.isAmbiguous(location.address)) {
-      await ctx.send.text('location_ambiguous');
-      return;
-    }
-  } else {
-    await askPlace(ctx, 'pickup');
-    return;
-  }
-
+async function finishPickup(ctx, location) {
+  const { session } = ctx;
   session.draft.pickup = location;
+  delete session.draft._placeOptions;
+  delete session.draft._placeQuery;
+  session.markModified('draft');
   await session.save();
 
   if (session.draft.tripType === 'HOURLY') {
@@ -185,6 +170,103 @@ async function handleBookingPickup(ctx) {
     await transition(session, STATES.BOOKING_DROP);
     await askDrop(ctx);
   }
+}
+
+/** One row of the place list: the name (up to 24 characters) with the full name and address underneath. */
+const placeRow = (m, i) => ({
+  id: `PLACE_${i}`,
+  title: m.name.slice(0, 24),
+  description: (m.name.length > 24 ? `${m.name} — ${m.address}` : m.address).slice(0, 72),
+});
+
+/** The address kept for the booking: the place name too, unless Google's address already has it. */
+const placeAddress = (m) => (String(m.address).toLowerCase().includes(String(m.name).toLowerCase()) ? m.address : `${m.name}, ${m.address}`);
+
+const TYPE_PICKUP_PROMPT = '🔍 Type the name of the place you are starting from (for example Rajajinagar or Majestic).';
+
+async function handleBookingPickup(ctx) {
+  const { message, session, language } = ctx;
+  const title = (message.text || message.interactiveTitle || '').trim();
+  const options = session.draft._placeOptions || [];
+
+  // "Current location" button
+  if (message.interactiveId === 'PICKUP_CURRENT' || /^(📍\s*)?current location$/i.test(title)) {
+    await sendLocationPrompt(ctx);
+    return;
+  }
+
+  // "Search place" button
+  if (message.interactiveId === 'PICKUP_SEARCH' || /^(🔍\s*)?search place$/i.test(title)) {
+    await ctx.send.raw(tOr(language, 'pickup_type_prompt', TYPE_PICKUP_PROMPT));
+    return;
+  }
+
+  // A map pin / current location shared with WhatsApp
+  if (message.location) {
+    await finishPickup(ctx, await describePin(locationParser.fromWhatsAppLocationMessage(message.location)));
+    return;
+  }
+
+  // Picking one of the suggestions shown earlier
+  if (options.length) {
+    const choice = readPlaceChoice(message, options);
+    if (choice.option) {
+      await finishPickup(ctx, { address: placeAddress(choice.option), latitude: choice.option.latitude, longitude: choice.option.longitude });
+      return;
+    }
+    if (choice.again) {
+      delete session.draft._placeOptions;
+      session.markModified('draft');
+      await session.save();
+      await ctx.send.raw(tOr(language, 'pickup_type_prompt', TYPE_PICKUP_PROMPT));
+      return;
+    }
+    if (choice.typed) {
+      await finishPickup(ctx, locationParser.fromTypedText(session.draft._placeQuery || title));
+      return;
+    }
+  }
+
+  if (!title) {
+    await askPlace(ctx, 'pickup');
+    return;
+  }
+
+  // The customer typed a name: look it up and show the matches
+  const matches = await searchPlaces(title);
+  if (!matches.length) {
+    const typed = locationParser.fromTypedText(title);
+    if (locationParser.isAmbiguous(typed.address)) {
+      await ctx.send.text('location_ambiguous');
+      return;
+    }
+    await finishPickup(ctx, typed);
+    return;
+  }
+
+  session.draft._placeOptions = matches;
+  session.draft._placeQuery = title;
+  session.markModified('draft');
+  await session.save();
+
+  await ctx.send.listRaw(
+    tOr(language, 'pickup_choose_body', 'Select your pickup location'),
+    tOr(language, 'btn_select_place', 'Select place'),
+    [
+      {
+        title: tOr(language, 'drop_matches_title', 'Matches'),
+        rows: matches.map(placeRow),
+      },
+      {
+        title: tOr(language, 'date_section_more', 'More'),
+        rows: [
+          { id: 'PLACE_AGAIN', title: '🔍 Search again' },
+          { id: 'PLACE_TYPED', title: '✏️ Use what I typed', description: title.slice(0, 72) },
+        ],
+      },
+    ],
+    { header: tOr(language, 'pickup_choose_header', '📍 Choose Pickup') }
+  );
 }
 
 // ── STEP 3: Drop (skipped for HOURLY) ───────────────────────────────
@@ -238,7 +320,7 @@ async function handleBookingDrop(ctx) {
   if (options.length) {
     const choice = readPlaceChoice(message, options);
     if (choice.option) {
-      await finishDrop(ctx, { address: choice.option.address, latitude: choice.option.latitude, longitude: choice.option.longitude });
+      await finishDrop(ctx, { address: placeAddress(choice.option), latitude: choice.option.latitude, longitude: choice.option.longitude });
       return;
     }
     if (choice.again) {
@@ -283,7 +365,7 @@ async function handleBookingDrop(ctx) {
     [
       {
         title: tOr(language, 'drop_matches_title', 'Matches'),
-        rows: matches.map((m, i) => ({ id: `PLACE_${i}`, title: m.name.slice(0, 24), description: m.address.slice(0, 72) })),
+        rows: matches.map(placeRow),
       },
       {
         title: tOr(language, 'date_section_more', 'More'),
@@ -307,6 +389,17 @@ async function handleBookingDrop(ctx) {
 /** "Now: Fri 9 Oct 2026, 11:24 AM (IST)" — shown on the date step so the customer sees today's date and time. */
 function nowLine(language) {
   return tOr(language, 'now_line', `🕒 Now: ${dateParser.now().format('ddd D MMM YYYY, h:mm A')} (IST)`);
+}
+
+/** Every half hour of the day as { id: '10:30', title: '10:30 AM' } for the Flow's time dropdown. */
+function flowTimeSlots() {
+  const slots = [];
+  for (let m = 0; m < 24 * 60; m += 30) {
+    const h = Math.floor(m / 60);
+    const mi = m % 60;
+    slots.push({ id: `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`, title: `${h % 12 || 12}:${String(mi).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}` });
+  }
+  return slots;
 }
 
 const calMonthKey = (returnTrip) => (returnTrip ? '_returnCalMonth' : '_calMonth');
@@ -423,11 +516,17 @@ async function promptDate(ctx, { returnTrip = false } = {}) {
     try {
       await ctx.send.flowRaw({
         header,
-        body: `${question}\n${nowLine(language)}\n\n${tOr(language, 'calendar_flow_hint', 'Tap the button to open the calendar, or just type a date (e.g. 25 Oct).')}`,
+        body: `${question}\n${nowLine(language)}\n\n${env.DATE_FLOW_TIME
+          ? tOr(language, 'calendar_flow_hint_time', 'Tap the button to pick the date and time, or just type a date (e.g. 25 Oct).')
+          : tOr(language, 'calendar_flow_hint', 'Tap the button to open the calendar, or just type a date (e.g. 25 Oct).')}`,
         flowId: env.DATE_FLOW_ID,
-        cta: tOr(language, 'date_pick_button', 'Pick a date'),
+        cta: env.DATE_FLOW_TIME ? tOr(language, 'date_time_pick_button', 'Pick date and time') : tOr(language, 'date_pick_button', 'Pick a date'),
         screen: 'PICK_DATE',
-        data: { min_date: min.format('YYYY-MM-DD'), max_date: lastMonth.endOf('month').format('YYYY-MM-DD') },
+        data: {
+          min_date: min.format('YYYY-MM-DD'),
+          max_date: lastMonth.endOf('month').format('YYYY-MM-DD'),
+          ...(env.DATE_FLOW_TIME ? { time_slots: flowTimeSlots() } : {}),
+        },
       });
       return;
     } catch (err) {
@@ -486,10 +585,10 @@ function readDateAnswer(message, rows = []) {
 
   if (id === 'CAL_PREV' || /^◀/.test(title)) return { move: -1 };
   if (id === 'CAL_NEXT' || /▶$/.test(title)) return { move: 1 };
-  const flowDate = /^FLOWDATE_(\d{4}-\d{2}-\d{2})$/.exec(id);
+  const flowDate = /^FLOWDATE_(\d{4}-\d{2}-\d{2})(?:_(\d{4}))?$/.exec(id);
   if (flowDate) {
     const picked = dateParser.resolveDatePhrase(flowDate[1]);
-    return picked ? { resolved: picked } : {};
+    return picked ? { resolved: picked, flowTimeId: flowDate[2] ? `TIME_${flowDate[2]}` : null } : {};
   }
   if (/^\d{1,2}$/.test(title)) return { day: Number(title) };
 
@@ -540,6 +639,7 @@ async function handleBookingDate(ctx) {
     date = await handleCalendarAnswer(ctx, answer);
     if (!date) return;
   }
+  const flowTimeId = answer.flowTimeId || null;
 
   if (!date) {
     await promptDate(ctx);
@@ -559,6 +659,11 @@ async function handleBookingDate(ctx) {
   session.markModified('draft');
   await session.save();
   await transition(session, STATES.BOOKING_TIME);
+  if (flowTimeId) {
+    // The calendar Flow already gave the time too: carry on as if the customer had tapped it.
+    await handleBookingTime({ ...ctx, message: { interactiveId: flowTimeId } });
+    return;
+  }
   await promptTime(ctx);
 }
 
@@ -696,6 +801,7 @@ async function handleBookingReturnDate(ctx) {
     date = await handleCalendarAnswer(ctx, answer, { returnTrip: true });
     if (!date) return;
   }
+  const flowTimeId = answer.flowTimeId || null;
 
   if (!date) {
     await promptDate(ctx, { returnTrip: true });
@@ -716,6 +822,10 @@ async function handleBookingReturnDate(ctx) {
   session.markModified('draft');
   await session.save();
   await transition(session, STATES.BOOKING_RETURN_TIME);
+  if (flowTimeId) {
+    await handleBookingReturnTime({ ...ctx, message: { interactiveId: flowTimeId } });
+    return;
+  }
   await promptTime(ctx, { returnTrip: true });
 }
 
