@@ -179,6 +179,16 @@ const placeRow = (m, i) => ({
   description: (m.name.length > 24 ? `${m.name} — ${m.address}` : m.address).slice(0, 72),
 });
 
+/** After a place is picked from the search results, show it on a small map. A failure never blocks the booking. */
+async function showPlaceMap(ctx, place) {
+  if (!env.PLACE_MAP_CARD || place.latitude == null || place.longitude == null) return;
+  try {
+    await ctx.send.locationCardRaw({ latitude: place.latitude, longitude: place.longitude, name: place.name, address: place.address });
+  } catch (err) {
+    logger.warn({ err: err.message }, '[booking] map card could not be sent');
+  }
+}
+
 /** The address kept for the booking: the place name too, unless Google's address already has it. */
 const placeAddress = (m) => (String(m.address).toLowerCase().includes(String(m.name).toLowerCase()) ? m.address : `${m.name}, ${m.address}`);
 
@@ -211,6 +221,7 @@ async function handleBookingPickup(ctx) {
   if (options.length) {
     const choice = readPlaceChoice(message, options);
     if (choice.option) {
+      await showPlaceMap(ctx, choice.option);
       await finishPickup(ctx, { address: placeAddress(choice.option), latitude: choice.option.latitude, longitude: choice.option.longitude });
       return;
     }
@@ -320,6 +331,7 @@ async function handleBookingDrop(ctx) {
   if (options.length) {
     const choice = readPlaceChoice(message, options);
     if (choice.option) {
+      await showPlaceMap(ctx, choice.option);
       await finishDrop(ctx, { address: placeAddress(choice.option), latitude: choice.option.latitude, longitude: choice.option.longitude });
       return;
     }
@@ -686,7 +698,8 @@ async function promptTime(ctx, { returnTrip = false } = {}) {
   const key = returnTrip ? '_returnTimePage' : '_timePage';
   const { lastPage } = dateParser.getTimePage({ slots, page: 0 });
   const page = Math.min(session.draft[key] || 0, lastPage);
-  const { timeRows, moreRows } = dateParser.getTimePage({ slots, page });
+  const showNow = !returnTrip && date.isSame(dateParser.now(), 'day');
+  const { timeRows, moreRows } = dateParser.getTimePage({ slots, page, nowLabel: showNow ? dateParser.now().format('h:mm A') : null });
 
   const question = returnTrip
     ? tOr(language, 'ask_return_time_body', 'What time should we pick you up for the return? (IST)')
@@ -711,6 +724,7 @@ function readTimeAnswer(message) {
   const title = (message.text || message.interactiveTitle || '').trim();
   const id = message.interactiveId || '';
 
+  if (id === 'TIME_NOW' || /^now\b/i.test(title)) return { now: true };
   if (id === 'TIME_MORE' || /more\s*times/i.test(title)) return { nav: 1 };
   if (id === 'TIME_EARLIER' || /earlier\s*times/i.test(title)) return { nav: -1 };
   if (id === 'TIME_CHANGE_DATE' || /change\s*date/i.test(title)) return { changeDate: true };
@@ -746,17 +760,26 @@ async function handleBookingTime(ctx) {
     return;
   }
 
-  const time = answer.time;
-  if (!time) {
-    await promptTime(ctx);
-    return;
-  }
-
   // _pendingDate is an ISO instant. Parse it as an instant and convert to India
   // time. (dayjs.tz(iso, TZ) reads the clock digits as India time instead, which
   // moved every booking one day earlier.)
   const dayjsDate = dayjs(session.draft._pendingDate).tz(dateParser.TZ);
-  const combined = dateParser.combineDateTime(dayjsDate, time);
+  let combined;
+  if (answer.now) {
+    // "Now": the exact current time (only offered for today).
+    if (!dayjsDate.isSame(dateParser.now(), 'day')) {
+      await promptTime(ctx);
+      return;
+    }
+    combined = dateParser.now().add(1, 'minute').startOf('minute');
+  } else {
+    const time = answer.time;
+    if (!time) {
+      await promptTime(ctx);
+      return;
+    }
+    combined = dateParser.combineDateTime(dayjsDate, time);
+  }
 
   if (dateParser.isPast(combined)) {
     await ctx.send.raw(tOr(ctx.language, 'time_in_past', 'That time has already passed. Please choose a later date or time.'));
