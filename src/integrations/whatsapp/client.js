@@ -41,8 +41,37 @@ async function sendMessage(payload) {
   }
 }
 
+/**
+ * Sends an approved WhatsApp message template (this is how MSG91 sends a Flow: the Flow is attached to a
+ * template with a Flow button). Uses MSG91's template endpoint; the template must be synced in MSG91.
+ */
+async function sendTemplate({ to, name, languageCode = 'en', namespace, components = {} }) {
+  const body = {
+    integrated_number: env.MSG91_INTEGRATED_NUMBER,
+    content_type: 'template',
+    payload: {
+      messaging_product: 'whatsapp',
+      type: 'template',
+      template: {
+        name,
+        language: { code: languageCode, policy: 'deterministic' },
+        ...(namespace ? { namespace } : {}),
+        to_and_components: [{ to: [to], components }],
+      },
+    },
+  };
+  try {
+    const res = await http.post('/whatsapp-outbound-message/bulk/', body);
+    logger.info({ to, template: name, msg91Response: res.data }, '[msg91] template send response');
+    return res.data;
+  } catch (err) {
+    logger.error({ err: err.response?.data || err.message, to, template: name }, '[msg91] template send failed');
+    throw err;
+  }
+}
+
 async function markAsRead() {
   return null;
 }
 
-module.exports = { sendMessage, markAsRead };
+module.exports = { sendMessage, sendTemplate, markAsRead };
