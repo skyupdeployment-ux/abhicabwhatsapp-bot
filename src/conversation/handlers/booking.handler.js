@@ -72,21 +72,37 @@ async function askPlace(ctx, kind = 'pickup') {
 }
 
 /**
- * The customer tapped "Current location". A plain text instruction always goes first (it shows
- * everywhere); WhatsApp's "Send location" button follows as an extra when it is switched on.
- * That button only appears on the phone app, so it must never be the only thing we send.
+ * The customer tapped "Current location". We ask for it straight away with WhatsApp's own
+ * "Send location" button (one tap opens the map and shares where they are). WhatsApp does not let a
+ * bot read GPS by itself, and it does not tell us if the customer declined, so the buttons above
+ * stay available as the fallback: Search place, or just type the name.
+ * If that button cannot be sent, plain instructions go out instead.
  */
 async function sendLocationPrompt(ctx) {
-  await ctx.send.raw(
-    tOr(ctx.language, 'share_location_steps', '📍 Please share your current location:\ntap 📎 → Location → Send your current location.\n\nOr just type the place name.')
-  );
+  const { language, session } = ctx;
+
+  // Do not send the same request again and again if the button is tapped repeatedly.
+  const last = Number(session.draft._locReqAt || 0);
+  if (Date.now() - last < 15000) {
+    await ctx.send.raw(tOr(language, 'location_request_again', 'Tap the Send location button above to share where you are. Or tap Search place.'));
+    return;
+  }
+  session.draft._locReqAt = Date.now();
+  session.markModified('draft');
+  await session.save();
+
+  const body = tOr(language, 'location_request_body', 'Tap the button below to share your current location.\nCan\'t share it? Tap Search place above, or type the place name.');
   if (env.LOCATION_REQUEST_BUTTON) {
     try {
-      await ctx.send.locationRequestRaw(tOr(ctx.language, 'share_location_button', 'Or tap the button below to share it.'));
+      await ctx.send.locationRequestRaw(body);
+      return;
     } catch (err) {
-      logger.warn({ err: err.message }, '[booking] location button could not be sent');
+      logger.warn({ err: err.message }, '[booking] location button could not be sent, using plain text');
     }
   }
+  await ctx.send.raw(
+    tOr(language, 'share_location_steps', '📍 Please share your current location:\ntap 📎 → Location → Send your current location.\n\nOr tap Search place, or type the place name.')
+  );
 }
 
 /** Drop question: a "Search place" button; the customer then types the name and picks a match. */
@@ -99,6 +115,89 @@ async function askDrop(ctx) {
     logger.warn({ err: err.message }, '[booking] search button could not be sent, using plain text');
     await ctx.send.raw(`${t(language, 'ask_drop')}\n\n${tOr(language, 'drop_type_prompt', '🔍 Type the name of the place you are going to.')}`);
   }
+}
+
+/** A shared WhatsApp place has a name and an address: keep both ("Hebbal Baptist Hospital, Kempapura, Bengaluru"). */
+function pinLocation(l) {
+  const base = locationParser.fromWhatsAppLocationMessage(l);
+  const name = l.name ? String(l.name).trim() : '';
+  const address = l.address ? String(l.address).trim() : '';
+  if (name && address) base.address = address.toLowerCase().includes(name.toLowerCase()) ? address : `${name}, ${address}`;
+  else if (address) base.address = address;
+  return base;
+}
+
+/**
+ * "Search place": WhatsApp's OWN map with its search bar opens from the "Send location" button.
+ * The customer searches there, picks a place and sends it. No link, and nothing to type in the chat.
+ * Returns true when the request went out; false means the caller should fall back to typing.
+ */
+async function sendNativeSearch(ctx, kind) {
+  const { language, session } = ctx;
+  if (!env.LOCATION_REQUEST_BUTTON) return false;
+
+  const key = `_locReqAt_${kind}`;
+  if (Date.now() - Number(session.draft[key] || 0) < 15000) {
+    await ctx.send.raw(tOr(language, 'native_search_again', 'Tap the Send location button above, search for the place on the map, and send it.'));
+    return true;
+  }
+  session.draft[key] = Date.now();
+  session.markModified('draft');
+  await session.save();
+
+  const body = kind === 'drop'
+    ? tOr(language, 'native_search_drop', 'Tap Send location below, search for your drop place on the map, and send it.')
+    : tOr(language, 'native_search_pickup', 'Tap Send location below, search for your pickup place on the map, and send it.');
+  try {
+    await ctx.send.locationRequestRaw(body);
+    return true;
+  } catch (err) {
+    logger.warn({ err: err.message }, '[booking] the Send location button could not be sent, falling back to typing');
+    return false;
+  }
+}
+
+/** True when the place map page can be used (needs PUBLIC_BASE_URL and a signing secret). */
+function usePlaceMap() {
+  return env.PLACE_MAP !== 'off' && calendarLink.enabled();
+}
+
+/** Sends the link to the map with the search bar, for the "pickup" or the "drop". Nothing is asked in the chat. */
+async function sendPlaceMapLink(ctx, kind) {
+  const { language, session } = ctx;
+  const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(env.PLACE_SEARCH_NEAR || '');
+  let near = m ? { latitude: Number(m[1]), longitude: Number(m[2]) } : null;
+  // For the drop, the map starts around the pickup.
+  if (kind === 'drop' && session.draft.pickup && session.draft.pickup.latitude != null) {
+    near = { latitude: session.draft.pickup.latitude, longitude: session.draft.pickup.longitude };
+  }
+  const token = calendarLink.createToken({ number: session.whatsappNumber, kind: `${kind}map`, near });
+  const url = `${calendarLink.linkFor(token, 'place-map')}?mode=search`;
+  const text = kind === 'drop'
+    ? tOr(language, 'drop_map_search', '🔍 Tap the link to search for your drop place on the map, then tap Confirm drop:')
+    : tOr(language, 'pickup_map_search', '🔍 Tap the link to search for your pickup place on the map, then tap Confirm pickup:');
+  await ctx.send.raw(`${text}\n${url}`);
+}
+
+/** True when the place search page can be used (needs PUBLIC_BASE_URL and a signing secret). */
+function useWebSearch() {
+  if (!calendarLink.enabled()) return false;
+  return env.LOCATION_SEARCH === 'web' || env.LOCATION_SEARCH === 'auto';
+}
+
+/** Sends the link to the search page: suggestions appear while the customer types; picking one saves it. */
+async function sendSearchLink(ctx, kind) {
+  const { language, session } = ctx;
+  const near = kind === 'drop' && session.draft.pickup && session.draft.pickup.latitude != null
+    ? { latitude: session.draft.pickup.latitude, longitude: session.draft.pickup.longitude }
+    : null;
+  const token = calendarLink.createToken({ number: session.whatsappNumber, kind, near });
+  const title = kind === 'drop'
+    ? tOr(language, 'search_link_drop', '🔍 Search your drop place')
+    : tOr(language, 'search_link_pickup', '🔍 Search your pickup place');
+  await ctx.send.raw(
+    `${title}\n${tOr(language, 'search_link_hint', 'Tap the link, type a place, area or landmark, and tap the result:')}\n${calendarLink.linkFor(token, 'place')}`
+  );
 }
 
 /** A shared pin may have no name. Give it a readable address (Google) or, failing that, its coordinates. */
@@ -163,7 +262,8 @@ async function finishPickup(ctx, location) {
   session.markModified('draft');
   await session.save();
 
-  if (session.draft.tripType === 'HOURLY') {
+  if (session.draft.tripType === 'HOURLY' || env.BOOKING_ORDER === 'date_first') {
+    // pickup -> date -> time -> (drop) ...
     await transition(session, STATES.BOOKING_DATE);
     await promptDate(ctx);
   } else {
@@ -207,13 +307,22 @@ async function handleBookingPickup(ctx) {
 
   // "Search place" button
   if (message.interactiveId === 'PICKUP_SEARCH' || /^(🔍\s*)?search place$/i.test(title)) {
+    if (usePlaceMap()) {
+      await sendPlaceMapLink(ctx, 'pickup');
+      return;
+    }
+    if (useWebSearch()) {
+      await sendSearchLink(ctx, 'pickup');
+      return;
+    }
+    if (env.LOCATION_SEARCH === 'native' && (await sendNativeSearch(ctx, 'pickup'))) return;
     await ctx.send.raw(tOr(language, 'pickup_type_prompt', TYPE_PICKUP_PROMPT));
     return;
   }
 
   // A map pin / current location shared with WhatsApp
   if (message.location) {
-    await finishPickup(ctx, await describePin(locationParser.fromWhatsAppLocationMessage(message.location)));
+    await finishPickup(ctx, await describePin(pinLocation(message.location)));
     return;
   }
 
@@ -306,6 +415,17 @@ async function finishDrop(ctx, location) {
   delete session.draft._placeQuery;
   session.markModified('draft');
   await session.save();
+
+  if (env.BOOKING_ORDER === 'date_first') {
+    // the date and time are already saved: round trips ask the return date, the rest go on to the cabs
+    if (session.draft.tripType === 'ROUND_TRIP') {
+      await transition(session, STATES.BOOKING_RETURN_DATE);
+      await promptDate(ctx, { returnTrip: true });
+      return;
+    }
+    await showVehicleOptions(ctx);
+    return;
+  }
   await transition(session, STATES.BOOKING_DATE);
   await promptDate(ctx);
 }
@@ -317,12 +437,21 @@ async function handleBookingDrop(ctx) {
 
   // A map pin shared with 📎 → Location
   if (message.location) {
-    await finishDrop(ctx, await describePin(locationParser.fromWhatsAppLocationMessage(message.location)));
+    await finishDrop(ctx, await describePin(pinLocation(message.location)));
     return;
   }
 
   // "Search place" button
   if (message.interactiveId === 'DROP_SEARCH' || /^(🔍\s*)?search place$/i.test(title)) {
+    if (usePlaceMap()) {
+      await sendPlaceMapLink(ctx, 'drop');
+      return;
+    }
+    if (useWebSearch()) {
+      await sendSearchLink(ctx, 'drop');
+      return;
+    }
+    if (env.LOCATION_SEARCH === 'native' && (await sendNativeSearch(ctx, 'drop'))) return;
     await ctx.send.raw(tOr(language, 'drop_type_prompt', TYPE_PLACE_PROMPT));
     return;
   }
@@ -540,6 +669,10 @@ async function promptDate(ctx, { returnTrip = false } = {}) {
           ...(env.DATE_FLOW_TIME ? { time_slots: flowTimeSlots() } : {}),
         },
       });
+      logger.info({ flowId: env.DATE_FLOW_ID }, '[booking] calendar flow sent to MSG91');
+      // MSG91 can accept a Flow that WhatsApp then fails to deliver, and the bot cannot see that.
+      // So a short plain message always follows: if the calendar never shows up, the customer can still type a date.
+      await ctx.send.raw(tOr(language, 'flow_type_hint', 'Can\'t see the calendar? Just type the date, for example 25 Oct.'));
       return;
     } catch (err) {
       logger.warn({ err: err.message }, '[booking] calendar flow could not be sent, using the text calendar');
@@ -547,7 +680,7 @@ async function promptDate(ctx, { returnTrip = false } = {}) {
   }
 
   // A link that opens a real tap-a-date calendar page (needs PUBLIC_BASE_URL); falls through to the lists if it is not set up.
-  if (env.DATE_PICKER === 'link' && calendarLink.enabled()) {
+  if ((env.DATE_PICKER === 'link' || env.DATE_PICKER === 'auto') && calendarLink.enabled()) {
     const token = calendarLink.createToken({
       number: session.whatsappNumber,
       min: min.format('YYYY-MM-DD'),
@@ -555,7 +688,7 @@ async function promptDate(ctx, { returnTrip = false } = {}) {
       returnTrip,
     });
     await ctx.send.raw(
-      `*${header}*\n${question}\n${nowLine(language)}\n\n${tOr(language, 'calendar_link_hint', 'Tap the link to open the calendar and pick your date:')}\n${calendarLink.linkFor(token)}\n\n${tOr(language, 'calendar_link_type', 'Or just type a date, e.g. 25 Oct.')}`
+      `*${header}*\n${question}\n${nowLine(language)}\n\n${tOr(language, 'calendar_link_hint', 'Tap the link to pick your date and time:')}\n${calendarLink.linkFor(token)}\n\n${tOr(language, 'calendar_link_type', 'Or just type a date, e.g. 25 Oct.')}`
     );
     return;
   }
@@ -793,14 +926,20 @@ async function handleBookingTime(ctx) {
   session.markModified('draft');
   await session.save();
 
-  if (session.draft.tripType === 'ROUND_TRIP') {
-    await transition(session, STATES.BOOKING_RETURN_DATE);
-    await promptDate(ctx, { returnTrip: true });
-    return;
-  }
   if (session.draft.tripType === 'HOURLY') {
     await transition(session, STATES.BOOKING_RENTAL_HOURS);
     await ctx.send.text('ask_rental_hours');
+    return;
+  }
+  if (env.BOOKING_ORDER === 'date_first') {
+    // pickup -> date -> time -> drop
+    await transition(session, STATES.BOOKING_DROP);
+    await askDrop(ctx);
+    return;
+  }
+  if (session.draft.tripType === 'ROUND_TRIP') {
+    await transition(session, STATES.BOOKING_RETURN_DATE);
+    await promptDate(ctx, { returnTrip: true });
     return;
   }
 
