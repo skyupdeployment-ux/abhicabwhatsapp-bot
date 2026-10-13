@@ -687,8 +687,26 @@ async function promptDate(ctx, { returnTrip = false } = {}) {
       max: lastMonth.endOf('month').format('YYYY-MM-DD'),
       returnTrip,
     });
+    const url = calendarLink.linkFor(token);
+    const typeHint = tOr(language, 'calendar_link_type', 'Or just type a date, e.g. 25 Oct.');
+    if (env.LINK_AS_BUTTON) {
+      try {
+        // One button that opens the calendar page: "Pick date and time".
+        await ctx.send.ctaUrlRaw({
+          header,
+          body: `${question}\n${nowLine(language)}\n\n${tOr(language, 'calendar_button_hint', 'Tap the button to pick your date and time.')}`,
+          text: tOr(language, 'date_time_pick_button', 'Pick date and time'),
+          url,
+        });
+        // If the button cannot be shown, the customer can still type a date.
+        await ctx.send.raw(tOr(language, 'button_type_hint', 'Can\'t see the button? Just type the date, for example 25 Oct.'));
+        return;
+      } catch (err) {
+        logger.warn({ err: err.message }, '[booking] the calendar button could not be sent, sending the link as text');
+      }
+    }
     await ctx.send.raw(
-      `*${header}*\n${question}\n${nowLine(language)}\n\n${tOr(language, 'calendar_link_hint', 'Tap the link to pick your date and time:')}\n${calendarLink.linkFor(token)}\n\n${tOr(language, 'calendar_link_type', 'Or just type a date, e.g. 25 Oct.')}`
+      `*${header}*\n${question}\n${nowLine(language)}\n\n${tOr(language, 'calendar_link_hint', 'Tap the link to pick your date and time:')}\n${url}\n\n${typeHint}`
     );
     return;
   }
