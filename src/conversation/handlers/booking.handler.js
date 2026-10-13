@@ -679,8 +679,20 @@ async function promptDate(ctx, { returnTrip = false } = {}) {
     }
   }
 
+  // The calendar Flow sent as an approved template with a Flow button (DATE_PICKER=template). Falls back to the calendar page.
+  if (env.DATE_PICKER === 'template' && env.FLOW_TEMPLATE_NAME) {
+    try {
+      await ctx.send.flowTemplateRaw({ name: env.FLOW_TEMPLATE_NAME, namespace: env.FLOW_TEMPLATE_NAMESPACE || undefined, languageCode: env.FLOW_TEMPLATE_LANGUAGE });
+      logger.info({ template: env.FLOW_TEMPLATE_NAME }, '[booking] calendar template sent to MSG91');
+      await ctx.send.raw(tOr(language, 'button_type_hint', 'Can\'t see the button? Just type the date, for example 25 Oct.'));
+      return;
+    } catch (err) {
+      logger.warn({ err: err.message }, '[booking] the calendar template could not be sent, using the calendar page');
+    }
+  }
+
   // A link that opens a real tap-a-date calendar page (needs PUBLIC_BASE_URL); falls through to the lists if it is not set up.
-  if ((env.DATE_PICKER === 'link' || env.DATE_PICKER === 'auto') && calendarLink.enabled()) {
+  if ((env.DATE_PICKER === 'link' || env.DATE_PICKER === 'auto' || env.DATE_PICKER === 'template') && calendarLink.enabled()) {
     const token = calendarLink.createToken({
       number: session.whatsappNumber,
       min: min.format('YYYY-MM-DD'),
