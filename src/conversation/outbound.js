@@ -1,4 +1,4 @@
-const { sendText, sendButtons, sendList, sendDocument, sendLocationRequest, sendFlow, sendLocation, sendCtaUrl } = require('../integrations/whatsapp/messageBuilder');
+const { sendText, sendButtons, sendList, sendDocument, sendFlowTemplate } = require('../integrations/whatsapp/messageBuilder');
 const { t } = require('../utils/i18n');
 
 /**
@@ -15,10 +15,7 @@ function makeSender(to, language) {
     list: (bodyKey, buttonLabelKey, sections, opts) =>
       sendList(to, t(language, bodyKey, opts?.vars), t(language, buttonLabelKey), sections, opts),
     listRaw: (body, buttonLabel, sections, opts) => sendList(to, body, buttonLabel, sections, opts),
-    ctaUrlRaw: (opts) => sendCtaUrl(to, opts),
-    locationCardRaw: (loc) => sendLocation(to, loc),
-    flowRaw: (opts) => sendFlow(to, opts),
-    locationRequestRaw: (body) => sendLocationRequest(to, body),
+    flow: (opts) => sendFlowTemplate(to, { lang: language, ...opts }),
     document: (link, filename, captionKey) => sendDocument(to, link, filename, captionKey ? t(language, captionKey) : undefined),
   };
 }
