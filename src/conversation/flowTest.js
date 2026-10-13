@@ -17,7 +17,25 @@ function timeSlots() {
   return slots;
 }
 
+async function runTemplateTest(ctx) {
+  try {
+    const res = await ctx.send.flowTemplateRaw({ name: env.FLOW_TEMPLATE_NAME, namespace: env.FLOW_TEMPLATE_NAMESPACE || undefined, languageCode: env.FLOW_TEMPLATE_LANGUAGE });
+    await ctx.send.raw(
+      `Flow test (template "${env.FLOW_TEMPLATE_NAME}"): MSG91 ACCEPTED the template.\n` +
+      'If a message with a Pick date and time button is shown above, the calendar works on your phone.\n' +
+      'If you see no message, open the MSG91 Logs page and read the reason.\n' +
+      `MSG91 said: ${JSON.stringify(res).slice(0, 300)}`
+    );
+  } catch (err) {
+    await ctx.send.raw(`Flow test (template "${env.FLOW_TEMPLATE_NAME}"): MSG91 REFUSED the template.\n${JSON.stringify((err.response && err.response.data) || err.message).slice(0, 500)}`);
+  }
+}
+
 async function runFlowTest(ctx) {
+  if (env.FLOW_TEMPLATE_NAME) {
+    await runTemplateTest(ctx);
+    return;
+  }
   if (!env.DATE_FLOW_ID) {
     await ctx.send.raw('Flow test: DATE_FLOW_ID is not set in Railway Variables, so there is no Flow to send.');
     return;
