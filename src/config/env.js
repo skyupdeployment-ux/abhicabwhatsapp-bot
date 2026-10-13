@@ -64,12 +64,17 @@ const env = {
   // Signs calendar links. Optional: MSG91_WEBHOOK_SECRET is used when this is empty.
   CALENDAR_LINK_SECRET: required('CALENDAR_LINK_SECRET', ''),
 
+  // The calendar Flow sent as an approved TEMPLATE with a Flow button (MSG91's documented way). Use with DATE_PICKER=template.
+  FLOW_TEMPLATE_NAME: required('FLOW_TEMPLATE_NAME', ''),
+  FLOW_TEMPLATE_NAMESPACE: required('FLOW_TEMPLATE_NAMESPACE', ''),
+  FLOW_TEMPLATE_LANGUAGE: required('FLOW_TEMPLATE_LANGUAGE', 'en'),
+
   // The calendar page opens from a BUTTON ("Pick date and time") instead of a link in the text. false = a plain link.
   LINK_AS_BUTTON: required('LINK_AS_BUTTON', 'true') !== 'false',
 
   // The date step:
   //   "auto" (default) = the calendar page (opened from a "Pick date and time" button) when the server address is known, else "taps";
-  //   "link" = always the calendar page;  "flow" = the WhatsApp Flow (needs DATE_FLOW_ID);  "taps" = month, week, day lists;
+  //   "link" = always the calendar page;  "template" = the Flow template (needs FLOW_TEMPLATE_NAME);  "flow" = the WhatsApp Flow (needs DATE_FLOW_ID);  "taps" = month, week, day lists;
   // "taps" = tap month, week, day in lists; "text" = text calendar, type the day number.
   DATE_PICKER: required('DATE_PICKER', 'auto'),
 
