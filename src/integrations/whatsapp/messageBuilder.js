@@ -163,4 +163,22 @@ async function sendLocation(to, { latitude, longitude, name, address }) {
   });
 }
 
-module.exports = { sendText, sendButtons, sendList, sendDocument, sendLocationRequest, sendFlow, sendLocation };
+/**
+ * A message with ONE button that opens a web page (WhatsApp's "call to action URL" button).
+ * The customer sees a button such as "Pick date and time", not a long link.
+ */
+async function sendCtaUrl(to, { header, body, footer, text, url }) {
+  return sendMessage({
+    to,
+    type: 'interactive',
+    interactive: {
+      type: 'cta_url',
+      ...(header ? { header: { type: 'text', text: clamp(header, LIMIT.HEADER) } } : {}),
+      body: { text: clamp(body, LIMIT.INT_BODY) },
+      ...(footer ? { footer: { text: clamp(footer, LIMIT.FOOTER) } } : {}),
+      action: { name: 'cta_url', parameters: { display_text: clamp(text, 20), url } },
+    },
+  });
+}
+
+module.exports = { sendText, sendButtons, sendList, sendDocument, sendLocationRequest, sendFlow, sendLocation, sendCtaUrl };
