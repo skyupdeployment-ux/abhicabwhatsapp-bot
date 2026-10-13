@@ -43,6 +43,12 @@ const env = {
   // true = the Flow also has a time dropdown (use date-time-calendar-flow.json); false = date only.
   DATE_FLOW_TIME: required('DATE_FLOW_TIME', 'false') === 'true',
 
+  // ─── Tappable calendar via an APPROVED flow TEMPLATE (MSG91) ──────────
+  // Used by booking.handler.js -> ctx.send.flow(...). Turn ON only after the
+  // flow + template are approved and synced in MSG91. While OFF, nothing changes.
+  FLOW_DATETIME_ENABLED: String(required('FLOW_DATETIME_ENABLED', 'false')).toLowerCase() === 'true',
+  FLOW_DATETIME_TEMPLATE: required('FLOW_DATETIME_TEMPLATE', ''), // approved flow-template name, e.g. 'abhicabs_datetime'
+
   // Order of the booking steps after the pickup:
   //   "drop_first" (default): pickup -> drop -> date -> time -> cab
   //   "date_first": pickup -> date -> time -> drop -> (return date/time) -> cab
