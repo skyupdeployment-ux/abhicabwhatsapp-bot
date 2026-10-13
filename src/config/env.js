@@ -38,16 +38,33 @@ const env = {
   // WhatsApp Flow with a real calendar (tap a date). Leave empty to use the text calendar.
   // See date-calendar-flow.json for the Flow to create in WhatsApp Manager.
   DATE_FLOW_ID: required('DATE_FLOW_ID', ''),
+  // true = typing "flowtest" in WhatsApp sends the Flow to yourself and reports MSG91's answer. For checking only.
+  ENABLE_FLOW_TEST: required('ENABLE_FLOW_TEST', 'false') === 'true',
   // true = the Flow also has a time dropdown (use date-time-calendar-flow.json); false = date only.
   DATE_FLOW_TIME: required('DATE_FLOW_TIME', 'false') === 'true',
+
+  // Order of the booking steps after the pickup:
+  //   "drop_first" (default): pickup -> drop -> date -> time -> cab
+  //   "date_first": pickup -> date -> time -> drop -> (return date/time) -> cab
+  BOOKING_ORDER: required('BOOKING_ORDER', 'drop_first'),
+
+  // "Search place" for pickup/drop:
+  //   "native" (default) = WhatsApp's own map with its search bar opens from a "Send location" button. No link, nothing to type.
+  //   "chat" = type the name in WhatsApp and pick from a list;  "web" = a search page from a link;  "auto" = web when set up, else chat.
+  LOCATION_SEARCH: required('LOCATION_SEARCH', 'native'),
+
+  // Optional: "Search place" (pickup and drop) opens a map PAGE from a link (search bar + marker + Confirm).
+  // "off" (default) = no links. "on" = use it when PUBLIC_BASE_URL is set.
+  PLACE_MAP: required('PLACE_MAP', 'off'),
 
   // Public https address of this server (no trailing slash), used for the calendar page link.
   PUBLIC_BASE_URL: required('PUBLIC_BASE_URL', ''),
   // Signs calendar links. Optional: MSG91_WEBHOOK_SECRET is used when this is empty.
   CALENDAR_LINK_SECRET: required('CALENDAR_LINK_SECRET', ''),
 
-  // Without a Flow: "link" = tap a link that opens a real calendar page;
-  // "taps" (default) = tap month, week, day in lists; "text" = text calendar, type the day number.
+  // Without a Flow: "taps" (default) = tap month, week, day in lists (no link);
+  // "link" = a link to a calendar + exact-time page; "auto" = that page when PUBLIC_BASE_URL is set, else "taps";
+  // "taps" = tap month, week, day in lists; "text" = text calendar, type the day number.
   DATE_PICKER: required('DATE_PICKER', 'taps'),
 
   // Show a small map card of the place the customer picks from the search results (false = off).
