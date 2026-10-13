@@ -62,6 +62,9 @@ const env = {
   // Signs calendar links. Optional: MSG91_WEBHOOK_SECRET is used when this is empty.
   CALENDAR_LINK_SECRET: required('CALENDAR_LINK_SECRET', ''),
 
+  // The calendar page opens from a BUTTON ("Pick date and time") instead of a link in the text. false = a plain link.
+  LINK_AS_BUTTON: required('LINK_AS_BUTTON', 'true') !== 'false',
+
   // Without a Flow: "taps" (default) = tap month, week, day in lists (no link);
   // "link" = a link to a calendar + exact-time page; "auto" = that page when PUBLIC_BASE_URL is set, else "taps";
   // "taps" = tap month, week, day in lists; "text" = text calendar, type the day number.
