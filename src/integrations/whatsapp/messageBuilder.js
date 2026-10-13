@@ -1,4 +1,5 @@
 const { sendMessage } = require('./client');
+const { buildFlowTemplatePayload } = require('./flowBuilder');
 
 // ── Meta WhatsApp field limits (exceeding ANY of these = silent drop) ──
 const LIMIT = {
@@ -114,6 +115,16 @@ async function sendDocument(to, link, filename, caption) {
   });
 }
 
+/**
+ * Sends the tappable-calendar date+time picker as a WhatsApp Flow template.
+ * `templateName` is the approved flow template (env FLOW_DATETIME_TEMPLATE).
+ * `flowToken` correlates the flow reply back to this booking step.
+ */
+async function sendFlowTemplate(to, { templateName, lang = 'en', flowToken } = {}) {
+  if (!templateName) throw new Error('sendFlowTemplate: templateName is required.');
+  return sendMessage(buildFlowTemplatePayload({ to, templateName, lang, flowToken }));
+}
+
 async function sendLocationRequest(to, bodyText) {
   return sendMessage({
     to,
@@ -126,59 +137,4 @@ async function sendLocationRequest(to, bodyText) {
   });
 }
 
-/**
- * A WhatsApp Flow message (e.g. the tap-a-date calendar). The Flow must be PUBLISHED in the same
- * WhatsApp Business Account as the sending number. Flows only open in the WhatsApp phone apps.
- */
-async function sendFlow(to, { header, body, footer, flowId, cta, screen, data, token }) {
-  return sendMessage({
-    to,
-    type: 'interactive',
-    interactive: {
-      type: 'flow',
-      ...(header ? { header: { type: 'text', text: clamp(header, LIMIT.HEADER) } } : {}),
-      body: { text: clamp(body, LIMIT.INT_BODY) },
-      ...(footer ? { footer: { text: clamp(footer, LIMIT.FOOTER) } } : {}),
-      action: {
-        name: 'flow',
-        parameters: {
-          flow_message_version: '3',
-          flow_token: token || 'abhicabs-date',
-          flow_id: String(flowId),
-          flow_cta: clamp(cta, LIMIT.BTN_LABEL),
-          flow_action: 'navigate',
-          flow_action_payload: { screen, data },
-        },
-      },
-    },
-  });
-}
-
-/** A map card: WhatsApp shows the place on a small map with its name and address. */
-async function sendLocation(to, { latitude, longitude, name, address }) {
-  return sendMessage({
-    to,
-    type: 'location',
-    location: { latitude, longitude, name: clamp(name || '', 100), address: clamp(address || '', 200) },
-  });
-}
-
-/**
- * A message with ONE button that opens a web page (WhatsApp's "call to action URL" button).
- * The customer sees a button such as "Pick date and time", not a long link.
- */
-async function sendCtaUrl(to, { header, body, footer, text, url }) {
-  return sendMessage({
-    to,
-    type: 'interactive',
-    interactive: {
-      type: 'cta_url',
-      ...(header ? { header: { type: 'text', text: clamp(header, LIMIT.HEADER) } } : {}),
-      body: { text: clamp(body, LIMIT.INT_BODY) },
-      ...(footer ? { footer: { text: clamp(footer, LIMIT.FOOTER) } } : {}),
-      action: { name: 'cta_url', parameters: { display_text: clamp(text, 20), url } },
-    },
-  });
-}
-
-module.exports = { sendText, sendButtons, sendList, sendDocument, sendLocationRequest, sendFlow, sendLocation, sendCtaUrl };
+module.exports = { sendText, sendButtons, sendList, sendDocument, sendLocationRequest, sendFlowTemplate };
