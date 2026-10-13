@@ -14,7 +14,7 @@ const {
   handleBookingTime,
   handleBookingReturnDate,
   handleBookingReturnTime,
-  handleBookingRentalHours,
+  handleBookingRentalHours,s
   handleBookingPassengers,
   handleBookingVehicleSelection,
   handleBookingFareConfirmation,
