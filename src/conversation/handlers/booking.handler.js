@@ -652,8 +652,8 @@ async function promptDate(ctx, { returnTrip = false } = {}) {
     `Type the day number (for example ${cal.firstAvailable || 15}) for ${cal.monthLabel}, or tap ◀ ▶ to change the month. A full date like 25 Dec 2026 also works.`
   );
 
-  // A real tap-a-date calendar (WhatsApp Flow) when one is set up; the text calendar is the fallback.
-  if (env.DATE_FLOW_ID) {
+  // The WhatsApp Flow calendar, only when DATE_PICKER=flow and DATE_FLOW_ID are set.
+  if (env.DATE_FLOW_ID && env.DATE_PICKER === 'flow') {
     try {
       await ctx.send.flowRaw({
         header,
