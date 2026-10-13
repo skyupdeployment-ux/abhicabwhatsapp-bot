@@ -7,6 +7,7 @@ const { logger } = require('./config/logger');
 const healthRoutes = require('./routes/health.routes');
 const webhookRoutes = require('./routes/webhook.routes');
 const adminRoutes = require('./routes/admin.routes');
+const calendarRoutes = require('./routes/calendar.routes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 
 const app = express();
@@ -34,6 +35,7 @@ app.use(
 app.use('/', healthRoutes);
 app.use('/webhook', webhookRoutes);
 app.use('/admin', adminRoutes);
+app.use('/calendar', calendarRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
