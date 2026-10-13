@@ -216,7 +216,7 @@ async function processInboundMessage(whatsappNumber, normalizedMessage) {
   }
 
   // Diagnostic: "flowtest" sends the calendar Flow to the sender and reports MSG91's answer (needs ENABLE_FLOW_TEST=true).
-  if (env.ENABLE_FLOW_TEST && !normalizedMessage.interactiveId && /^flowtest$/i.test(greetingText)) {
+  if (env.ENABLE_FLOW_TEST && !normalizedMessage.interactiveId && /^flow\s*test$/i.test(greetingText)) {
     await require('./flowTest').runFlowTest(ctx);
     await touchSession(session);
     return;
