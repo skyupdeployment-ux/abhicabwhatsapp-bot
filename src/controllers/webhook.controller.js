@@ -31,7 +31,7 @@ async function receiveWebhook(req, res) {
     // are customer messages; outbound delivery-report events (direction "1",
     // or eventName like "sent"/"delivered"/"read") are not something the
     // conversation engine should reply to.
-        if (event.direction === '1' || (!event.text && !event.button && !event.interactive && !event.latitude)) {
+           if (event.direction === '1' || (!event.text && !event.button && !event.interactive && !event.latitude && !event.messages)) {
       logger.debug({ eventName: event.eventName, requestId: event.requestId }, '[webhook] ignored — delivery/status report, not a customer message');
       return;
     }
