@@ -2,6 +2,7 @@ const { STATES } = require('./states');
 const { getOrCreateSession, touchSession } = require('./sessionManager');
 const { makeSender } = require('./outbound');
 const { t } = require('../utils/i18n');
+const env = require('../config/env');
 const { logger } = require('../config/logger');
 
 const { renderMainMenu, handleMainMenu } = require('./handlers/mainMenu.handler');
@@ -210,6 +211,13 @@ async function processInboundMessage(whatsappNumber, normalizedMessage) {
     await session.save();
     await transition(session, STATES.MAIN_MENU);
     await renderMainMenu(ctx);
+    await touchSession(session);
+    return;
+  }
+
+  // Diagnostic: "flowtest" sends the calendar Flow to the sender and reports MSG91's answer (needs ENABLE_FLOW_TEST=true).
+  if (env.ENABLE_FLOW_TEST && !normalizedMessage.interactiveId && /^flowtest$/i.test(greetingText)) {
+    await require('./flowTest').runFlowTest(ctx);
     await touchSession(session);
     return;
   }
