@@ -115,6 +115,11 @@ async function finishRoute(ctx, route) {
   delete session.draft._placeQuery;
   session.markModified('draft');
   await session.save();
+  // Say the places back in the chat, exactly as chosen on the page.
+  await ctx.send.raw(
+    `✅ ${route.drop ? tOr(ctx.language, 'route_saved', 'Pickup and drop saved') : tOr(ctx.language, 'pickup_saved', 'Pickup saved')}\n📍 ${route.pickup.address}` +
+    (route.drop ? `\n🏁 ${route.drop.address}` : '')
+  );
   await transition(session, STATES.BOOKING_DATE);
   await promptDate(ctx);
 }
@@ -926,7 +931,7 @@ async function handleBookingDate(ctx) {
   await transition(session, STATES.BOOKING_TIME);
   if (flowTimeId) {
     // The calendar Flow already gave the time too: carry on as if the customer had tapped it.
-    await handleBookingTime({ ...ctx, message: { interactiveId: flowTimeId } });
+    await handleBookingTime({ ...ctx, message: { interactiveId: flowTimeId, fromPage: true } });
     return;
   }
   await promptTime(ctx);
@@ -1045,6 +1050,10 @@ async function handleBookingTime(ctx) {
   session.draft.pickupAt = combined.toDate();
   session.markModified('draft');
   await session.save();
+  if (message.fromPage) {
+    // The date and time were chosen on the calendar page: say them back in the chat, exactly as entered.
+    await ctx.send.raw(`✅ ${tOr(ctx.language, 'date_time_saved', 'Date and time saved')}\n📅 ${combined.format('dddd, D MMM YYYY')}\n⏰ ${combined.format('h:mm A')} (IST)`);
+  }
 
   if (session.draft.tripType === 'HOURLY') {
     await transition(session, STATES.BOOKING_RENTAL_HOURS);
@@ -1105,7 +1114,7 @@ async function handleBookingReturnDate(ctx) {
   await session.save();
   await transition(session, STATES.BOOKING_RETURN_TIME);
   if (flowTimeId) {
-    await handleBookingReturnTime({ ...ctx, message: { interactiveId: flowTimeId } });
+    await handleBookingReturnTime({ ...ctx, message: { interactiveId: flowTimeId, fromPage: true } });
     return;
   }
   await promptTime(ctx, { returnTrip: true });
@@ -1149,6 +1158,9 @@ async function handleBookingReturnTime(ctx) {
   session.draft.returnAt = combined.toDate();
   session.markModified('draft');
   await session.save();
+  if (message.fromPage) {
+    await ctx.send.raw(`✅ ${tOr(ctx.language, 'return_saved', 'Return date and time saved')}\n📅 ${combined.format('dddd, D MMM YYYY')}\n⏰ ${combined.format('h:mm A')} (IST)`);
+  }
   await showVehicleOptions(ctx);
 }
 
@@ -1349,8 +1361,7 @@ async function handleBookingVehicleSelection(ctx) {
 
 async function handleBookingPassengers(ctx) {
   const { message, session } = ctx;
-  const countMatch = (message.text || message.interactiveTitle || '').match(/\d+/);
-  const count = countMatch ? parseInt(countMatch[0], 10) : 0;
+  const count = require('../nlu/numberWords').parseCount(message.text || message.interactiveTitle || '');
   if (!count || count > 60) {
     await ctx.send.text('ask_passenger_count');
     return;
