@@ -1094,6 +1094,7 @@ async function showVehicleOptions(ctx, { minSeats = 0 } = {}) {
   await ctx.send.text('checking_vehicles');
 
   let options;
+  const fareStartedAt = Date.now();
   try {
     options = await callTool('getFareOptions', {
       tripType: session.draft.tripType,
@@ -1107,6 +1108,12 @@ async function showVehicleOptions(ctx, { minSeats = 0 } = {}) {
     logger.error({ err: err.message }, '[booking] getFareOptions failed');
     await ctx.send.text('fare_api_failed');
     return;
+  }
+
+  {
+    // Timing: the road distance (Google) and the vehicle lookup together.
+    const ms = Date.now() - fareStartedAt;
+    logger.info({ ms }, ms >= 3000 ? '[perf] SLOW fare lookup (Google distance + vehicles)' : '[perf] fare lookup (Google distance + vehicles)');
   }
 
   options = (options || []).filter((o) => o.seatingCapacity >= minSeats);
