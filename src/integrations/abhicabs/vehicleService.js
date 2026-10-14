@@ -1,4 +1,5 @@
 const env = require('../../config/env');
+const { getActiveVehicles } = require('./activeVehicles');
 const { getPrisma } = require('../../config/db');
 const backendHttp = require('./backendHttp');
 
@@ -14,7 +15,7 @@ async function getAvailableVehicles({ tripType }) {
   }
 
   const prisma = getPrisma();
-  const allActive = await prisma.vehicle.findMany({ where: { active: true } });
+  const allActive = await getActiveVehicles();
   // supportedTripTypes is a Json column, so filter in JS (Prisma's `has` only works on scalar lists).
   const vehicles = allActive.filter(
     (v) => Array.isArray(v.supportedTripTypes) && v.supportedTripTypes.includes(tripType)
