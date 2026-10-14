@@ -4,6 +4,7 @@ const { getPrisma } = require('../config/db');
 const { processInboundMessage } = require('../conversation/stateMachine');
 const { STATES } = require('../conversation/states');
 const { logger } = require('../config/logger');
+const env = require('../config/env');
 const dateParser = require('../conversation/nlu/dateParser');
 
 const PAGE = `<!doctype html>
@@ -29,7 +30,7 @@ select{height:46px;border-radius:10px;border:1px solid var(--line);background:va
 #ok{width:100%;height:50px;margin-top:12px;border:0;border-radius:12px;background:var(--accent);color:var(--on);font-size:16px;font-weight:600;cursor:pointer}
 #ok:disabled{opacity:.45;cursor:default}#msg{font-size:14px;min-height:20px;margin-top:8px}.err{color:var(--danger)}.done{text-align:center;padding:24px 8px}.done .big{font-size:44px;color:var(--ok)}
 </style></head><body>
-<main class="card" id="card">
+<main class="card" id="card" data-wa="__WA__">
 <h1>Pick date and time</h1><p class="sub" id="now"></p>
 <div id="app">
 <div class="nav"><button id="prev" aria-label="Previous month">&#8249;</button><div class="month" id="month" aria-live="polite"></div><button id="next" aria-label="Next month">&#8250;</button></div>
@@ -108,7 +109,7 @@ ok.disabled=true;msg.className='';msg.textContent='Saving...';
 fetch('/calendar/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:token,date:sel,time:time})})
 .then(function(r){return r.json().then(function(j){return {s:r.status,j:j};});})
 .then(function(x){
-if(x.j&&x.j.ok){document.getElementById('card').innerHTML='<div class="done"><div class="big">&#10003;</div><h1>Date and time saved</h1><p class="sub">'+long(parse(sel))+', '+(Math.floor(c/60)%12||12)+':'+pad(c%60)+' '+(Math.floor(c/60)<12?'AM':'PM')+'</p><p>Your booking is moving on in WhatsApp. You can close this page.</p></div>';return;}
+if(x.j&&x.j.ok){var card=document.getElementById('card'),wa=card.getAttribute('data-wa')||'';card.innerHTML='<div class="done"><div class="big">&#10003;</div><h1>Date and time saved</h1><p class="sub">'+long(parse(sel))+', '+(Math.floor(c/60)%12||12)+':'+pad(c%60)+' '+(Math.floor(c/60)<12?'AM':'PM')+'</p><p>Your booking is moving on in WhatsApp.</p>'+(wa?'<p><a href="'+wa+'" style="display:inline-block;padding:12px 22px;border-radius:12px;background:var(--accent);color:var(--on);font-weight:600;text-decoration:none">Back to WhatsApp</a></p>':'<p>You can close this page.</p>')+'</div>';return;}
 msg.className='err';msg.textContent=x.s===409?'This step is already done. Go back to WhatsApp.':(x.s===410?'This link has expired. Tap the date step again in WhatsApp.':(x.j&&x.j.error==='time_passed'?'That time has already passed. Choose a later time.':'Could not save that. Try again.'));ok.disabled=false;})
 .catch(function(){msg.className='err';msg.textContent='No connection. Try again.';ok.disabled=false;});});
 render();
@@ -124,7 +125,8 @@ function showCalendar(req, res) {
   if (!info || info.kind !== 'date') {
     return res.status(410).type('html').send(msgPage('This link has expired', 'Go back to WhatsApp and tap the date step again.'));
   }
-  return res.type('html').send(PAGE);
+  const digits = String(env.MSG91_INTEGRATED_NUMBER || '').replace(/\D/g, '');
+  return res.type('html').send(PAGE.replace('__WA__', digits ? `https://wa.me/${digits}` : ''));
 }
 
 function appJs(req, res) {
