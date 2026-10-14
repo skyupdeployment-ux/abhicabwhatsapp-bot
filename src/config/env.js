@@ -77,8 +77,8 @@ const env = {
   // "auto" (default) = on when the server address is known; "off" = the Send location screen / buttons instead.
   ROUTE_PAGE: required('ROUTE_PAGE', 'auto'),
 
-  // The short "Can't see the button? Just type the date" line after the date button. false = one message less per booking.
-  DATE_TYPE_HINT: required('DATE_TYPE_HINT', 'true') !== 'false',
+  // The extra "Can't see the button? Just type ..." lines after a button. OFF by default (fewer messages); true = send them.
+  DATE_TYPE_HINT: required('DATE_TYPE_HINT', 'false') === 'true',
 
   // The calendar page opens from a BUTTON ("Pick date and time") instead of a link in the text. false = a plain link.
   LINK_AS_BUTTON: required('LINK_AS_BUTTON', 'true') !== 'false',
