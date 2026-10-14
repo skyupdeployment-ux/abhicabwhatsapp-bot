@@ -69,6 +69,9 @@ const env = {
   FLOW_TEMPLATE_NAMESPACE: required('FLOW_TEMPLATE_NAMESPACE', ''),
   FLOW_TEMPLATE_LANGUAGE: required('FLOW_TEMPLATE_LANGUAGE', 'en'),
 
+  // The short "Can't see the button? Just type the date" line after the date button. false = one message less per booking.
+  DATE_TYPE_HINT: required('DATE_TYPE_HINT', 'true') !== 'false',
+
   // The calendar page opens from a BUTTON ("Pick date and time") instead of a link in the text. false = a plain link.
   LINK_AS_BUTTON: required('LINK_AS_BUTTON', 'true') !== 'false',
 
