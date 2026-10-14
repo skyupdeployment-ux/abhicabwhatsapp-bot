@@ -2,7 +2,7 @@ const { v4: uuid } = require('uuid');
 const env = require('../../config/env');
 const { getPrisma } = require('../../config/db');
 const backendHttp = require('./backendHttp');
-const { resolveDistanceKm } = require('./distanceService');
+const { resolveRouteKm } = require('./distanceService');
 
 // In-memory quote cache so a fare shown to the customer can be re-verified
 // at booking time without recomputing (and without letting the AI restate
@@ -64,7 +64,7 @@ async function getFareOptions({ tripType, pickup, drop, pickupAt, returnAt, rent
   const vehicles = allActive.filter(
     (v) => Array.isArray(v.supportedTripTypes) && v.supportedTripTypes.includes(tripType)
   );
-  const distanceKm = drop ? await resolveDistanceKm(pickup, drop) : null; // Google road distance, see distanceService.js
+  const distanceKm = drop ? await resolveRouteKm(pickup, drop) : null; // Google road distance, see distanceService.js
   const days =
     tripType === 'ROUND_TRIP' && returnAt
       ? Math.max(1, Math.ceil((new Date(returnAt) - new Date(pickupAt)) / 86400000))
