@@ -672,7 +672,7 @@ async function promptDate(ctx, { returnTrip = false } = {}) {
       logger.info({ flowId: env.DATE_FLOW_ID }, '[booking] calendar flow sent to MSG91');
       // MSG91 can accept a Flow that WhatsApp then fails to deliver, and the bot cannot see that.
       // So a short plain message always follows: if the calendar never shows up, the customer can still type a date.
-      await ctx.send.raw(tOr(language, 'flow_type_hint', 'Can\'t see the calendar? Just type the date, for example 25 Oct.'));
+      if (env.DATE_TYPE_HINT) await ctx.send.raw(tOr(language, 'flow_type_hint', 'Can\'t see the calendar? Just type the date, for example 25 Oct.'));
       return;
     } catch (err) {
       logger.warn({ err: err.message }, '[booking] calendar flow could not be sent, using the text calendar');
@@ -684,7 +684,7 @@ async function promptDate(ctx, { returnTrip = false } = {}) {
     try {
       await ctx.send.flowTemplateRaw({ name: env.FLOW_TEMPLATE_NAME, namespace: env.FLOW_TEMPLATE_NAMESPACE || undefined, languageCode: env.FLOW_TEMPLATE_LANGUAGE });
       logger.info({ template: env.FLOW_TEMPLATE_NAME }, '[booking] calendar template sent to MSG91');
-      await ctx.send.raw(tOr(language, 'button_type_hint', 'Can\'t see the button? Just type the date, for example 25 Oct.'));
+      if (env.DATE_TYPE_HINT) await ctx.send.raw(tOr(language, 'button_type_hint', 'Can\'t see the button? Just type the date, for example 25 Oct.'));
       return;
     } catch (err) {
       logger.warn({ err: err.message }, '[booking] the calendar template could not be sent, using the calendar page');
@@ -711,7 +711,7 @@ async function promptDate(ctx, { returnTrip = false } = {}) {
           url,
         });
         // If the button cannot be shown, the customer can still type a date.
-        await ctx.send.raw(tOr(language, 'button_type_hint', 'Can\'t see the button? Just type the date, for example 25 Oct.'));
+        if (env.DATE_TYPE_HINT) await ctx.send.raw(tOr(language, 'button_type_hint', 'Can\'t see the button? Just type the date, for example 25 Oct.'));
         return;
       } catch (err) {
         logger.warn({ err: err.message }, '[booking] the calendar button could not be sent, sending the link as text');
