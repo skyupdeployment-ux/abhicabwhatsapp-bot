@@ -158,10 +158,17 @@ async function selectDate(req, res) {
   if (!session || session.state !== waiting) return res.status(409).json({ ok: false, error: 'not_waiting' });
 
   res.json({ ok: true });
+  const startedAt = Date.now();
   processInboundMessage(info.number, {
     id: `cal-${crypto.randomUUID()}`, from: info.number, timestamp: null, type: 'flow',
     text: null, interactiveId: `FLOWDATE_${date}${hhmm ? `_${hhmm}` : ''}`, interactiveTitle: date, location: null,
-  }).catch((err) => logger.error({ err: err.message }, '[calendar] could not continue the booking'));
+  })
+    .then(() => {
+      // Timing: from the customer's Confirm to the last reply sent (vehicles list included).
+      const ms = Date.now() - startedAt;
+      logger.info({ ms }, ms >= 3000 ? '[perf] SLOW booking step after calendar confirm' : '[perf] booking step after calendar confirm');
+    })
+    .catch((err) => logger.error({ err: err.message }, '[calendar] could not continue the booking'));
 }
 
 module.exports = { showCalendar, appJs, selectDate };
