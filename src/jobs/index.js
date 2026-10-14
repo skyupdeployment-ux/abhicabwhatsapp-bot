@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const { logger } = require('../config/logger');
 const { runSessionTimeoutSweep } = require('./sessionTimeout.job');
 const { sendAbandonedBookingFollowUps } = require('./abandonedBooking.job');
+const { sendBookingReminders } = require('./bookingReminder.job');
 
 const scheduled = [];
 
@@ -20,6 +21,15 @@ function startJobs() {
     cron.schedule('*/10 * * * *', () => {
       sendAbandonedBookingFollowUps().catch((err) =>
         logger.error({ err: err.message }, '[jobs] abandonedBooking sweep failed')
+      );
+    })
+  );
+
+  // Every minute: trip reminders, one hour and 30 minutes before the pickup.
+  scheduled.push(
+    cron.schedule('* * * * *', () => {
+      sendBookingReminders().catch((err) =>
+        logger.error({ err: err.message }, '[jobs] booking reminders failed')
       );
     })
   );
