@@ -44,6 +44,15 @@ class SessionRecord {
     this.handoffReason = row.handoffReason;
     this.lastMessageAt = row.lastMessageAt;
     this.expiresAt = row.expiresAt;
+    this._snap = this._snapshot();
+  }
+
+  /** Everything save() writes, as text: if it has not changed since the last write there is nothing to save. */
+  _snapshot() {
+    return JSON.stringify([
+      this.customerId, this.language, this.state, this.previousState, this.draft, this.activeBookingId, this.activePaymentId,
+      this.pendingIdempotencyKey, this.pendingOptionsMap, this.humanHandoff, this.handoffReason, this.lastMessageAt, this.expiresAt,
+    ]);
   }
 
   /** Mongoose alias some code still reads (e.g. bookingIdempotencyKey(String(session._id), ...)). */
@@ -56,10 +65,21 @@ class SessionRecord {
     this.pendingIdempotencyKey = null;
   }
 
+  /** Writes everything changed while answering a message, in ONE database trip, and stops holding writes back. */
+  async flush() {
+    this._deferSaves = false;
+    return this.save();
+  }
+
   /** No-op — Mongoose needed this to track nested-object mutations; Prisma writes the whole JSON column back on save() regardless. */
   markModified() {}
 
   async save() {
+    // While a message is being answered, writes are held back and done once at the end (see flush()).
+    if (this._deferSaves) return this;
+    // Each database trip costs real time when the database is far away, so an unchanged session is not written again.
+    const snap = this._snapshot();
+    if (snap === this._snap) return this;
     const prisma = getPrisma();
     await prisma.session.update({
       where: { id: this.id },
@@ -79,6 +99,7 @@ class SessionRecord {
         expiresAt: this.expiresAt,
       },
     });
+    this._snap = snap;
     return this;
   }
 }
