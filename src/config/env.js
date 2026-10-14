@@ -73,6 +73,10 @@ const env = {
   // location screen (current location, search bar, Choose on map). false = the Current location / Search place buttons.
   LOCATION_ONE_TAP: required('LOCATION_ONE_TAP', 'true') !== 'false',
 
+  // The pickup question opens one map page with a Pickup and a Drop field (suggestions show the km), like Uber.
+  // "auto" (default) = on when the server address is known; "off" = the Send location screen / buttons instead.
+  ROUTE_PAGE: required('ROUTE_PAGE', 'auto'),
+
   // The short "Can't see the button? Just type the date" line after the date button. false = one message less per booking.
   DATE_TYPE_HINT: required('DATE_TYPE_HINT', 'true') !== 'false',
 
