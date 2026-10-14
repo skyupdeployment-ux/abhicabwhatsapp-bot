@@ -8,6 +8,7 @@ const healthRoutes = require('./routes/health.routes');
 const webhookRoutes = require('./routes/webhook.routes');
 const adminRoutes = require('./routes/admin.routes');
 const calendarRoutes = require('./routes/calendar.routes');
+const routeMapRoutes = require('./routes/routeMap.routes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 
 const app = express();
@@ -36,6 +37,7 @@ app.use('/', healthRoutes);
 app.use('/webhook', webhookRoutes);
 app.use('/admin', adminRoutes);
 app.use('/calendar', calendarRoutes);
+app.use('/route-map', routeMapRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
