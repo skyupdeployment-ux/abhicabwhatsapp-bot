@@ -144,8 +144,23 @@ async function handleHumanHandoff(ctx) {
  * inbound message. Handles session load, global interrupts, dispatch,
  * and always touches lastMessageAt so timeout logic stays accurate.
  */
-async function processInboundMessage(whatsappNumber, normalizedMessage) {
-  const { session, customer, wasExpired } = await getOrCreateSession(whatsappNumber);
+async function processInboundMessage(whatsappNumber, normalizedMessage, preloaded = null) {
+  // `preloaded` is a getOrCreateSession() that the webhook started earlier, in parallel with the duplicate check.
+  const loaded = await (preloaded || getOrCreateSession(whatsappNumber));
+  // Every change made while answering is written together, once, at the end: one database trip instead of several.
+  loaded.session._deferSaves = true;
+  try {
+    await handleLoadedMessage(whatsappNumber, normalizedMessage, loaded);
+  } finally {
+    try {
+      await loaded.session.flush();
+    } catch (err) {
+      logger.error({ err: err.message }, '[stateMachine] could not save the session');
+    }
+  }
+}
+
+async function handleLoadedMessage(whatsappNumber, normalizedMessage, { session, customer, wasExpired }) {
   const language = session.language || 'en';
   const send = makeSender(whatsappNumber, language);
 
