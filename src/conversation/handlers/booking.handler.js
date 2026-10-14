@@ -1194,19 +1194,24 @@ const titleCase = (s) =>
  */
 async function showVehicleOptions(ctx, { minSeats = 0 } = {}) {
   const { session } = ctx;
+
+  // Start the fare lookup (Google distance + vehicles) FIRST and send the "checking" message while it runs:
+  // the two waits overlap instead of adding up. The customer still sees the message before the list.
+  const fareStartedAt = Date.now();
+  const lookup = callTool('getFareOptions', {
+    tripType: session.draft.tripType,
+    pickup: session.draft.pickup,
+    drop: session.draft.drop,
+    pickupAt: session.draft.pickupAt,
+    returnAt: session.draft.returnAt,
+    rentalHours: session.draft.rentalHours,
+  });
+  lookup.catch(() => {}); // handled below; avoids a stray warning while the message is being sent
   await ctx.send.text('checking_vehicles');
 
   let options;
-  const fareStartedAt = Date.now();
   try {
-    options = await callTool('getFareOptions', {
-      tripType: session.draft.tripType,
-      pickup: session.draft.pickup,
-      drop: session.draft.drop,
-      pickupAt: session.draft.pickupAt,
-      returnAt: session.draft.returnAt,
-      rentalHours: session.draft.rentalHours,
-    });
+    options = await lookup;
   } catch (err) {
     logger.error({ err: err.message }, '[booking] getFareOptions failed');
     await ctx.send.text('fare_api_failed');
