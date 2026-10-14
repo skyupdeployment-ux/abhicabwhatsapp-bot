@@ -1158,6 +1158,7 @@ async function showVehicleOptions(ctx, { minSeats = 0 } = {}) {
     seatingCapacity: o.seatingCapacity,
     ac: o.ac,
     fareQuoteId: o.fareQuoteId,
+    distanceKm: o.distanceKm ?? null,
     fare: o.fare,
   }));
   session.draft._vehicleCategory = null;
@@ -1230,6 +1231,7 @@ async function chooseVehicle(ctx, option) {
   session.draft.vehicleClass = option.category;
   session.draft.fareQuoteId = option.fareQuoteId;
   session.draft.fare = option.fare;
+  session.draft.distanceKm = option.distanceKm ?? null;
   session.markModified('draft');
   await session.save();
 
@@ -1307,6 +1309,7 @@ async function showFareConfirmation(ctx, option) {
   const body =
     `${t(ctx.language, 'fare_estimate_title')}\n\n` +
     `Vehicle: ${option.vehicleName}\n` +
+    (option.distanceKm ? `Distance: ${option.distanceKm} km${session.draft.tripType === 'ROUND_TRIP' ? ' one way' : ''}\n` : '') +
     `Base Fare: ₹${f.baseFare}\n` +
     (f.driverAllowance ? `Driver Allowance: ₹${f.driverAllowance}\n` : '') +
     (f.surge ? `Surge: ₹${f.surge}\n` : '') +
