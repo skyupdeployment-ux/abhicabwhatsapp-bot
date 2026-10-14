@@ -116,11 +116,10 @@ async function finishRoute(ctx, route) {
   session.markModified('draft');
   await session.save();
   // Say the places back in the chat, exactly as chosen on the page.
-  await ctx.send.raw(
+  ctx.echoPrefix =
     `✅ ${route.drop ? tOr(ctx.language, 'route_saved', 'Pickup and drop saved') : tOr(ctx.language, 'pickup_saved', 'Pickup saved')}\n📍 ${route.pickup.address}` +
     ((route.drop && route.drop.stops) || []).map((st, i) => `\n➕ Stop ${i + 1}: ${st.address}`).join('') +
-    (route.drop ? `\n🏁 ${route.drop.address}` : '')
-  );
+    (route.drop ? `\n🏁 ${route.drop.address}` : '');
   await transition(session, STATES.BOOKING_DATE);
   await promptDate(ctx);
 }
@@ -738,9 +737,12 @@ async function promptDate(ctx, { returnTrip = false } = {}) {
   const { min, month, lastMonth } = calendarFor(session, returnTrip);
   const cal = dateParser.renderMonthCalendar({ month, min, lastMonth });
 
-  const question = returnTrip
+  // A "saved" line from the step before rides along in this message: one send instead of two.
+  const carried = ctx.echoPrefix ? `${ctx.echoPrefix}\n\n` : '';
+  ctx.echoPrefix = null;
+  const question = carried + (returnTrip
     ? tOr(language, 'ask_return_date_body', 'What date will you return?')
-    : tOr(language, 'ask_date_body', 'What date would you like to travel?');
+    : tOr(language, 'ask_date_body', 'What date would you like to travel?'));
   const header = returnTrip ? tOr(language, 'return_date_header', '📅 Return Date') : tOr(language, 'date_header', '📅 Pick a Date');
   const how = tOr(
     language,
@@ -1053,7 +1055,11 @@ async function handleBookingTime(ctx) {
   await session.save();
   if (message.fromPage) {
     // The date and time were chosen on the calendar page: say them back in the chat, exactly as entered.
-    await ctx.send.raw(`✅ ${tOr(ctx.language, 'date_time_saved', 'Date and time saved')}\n📅 ${combined.format('dddd, D MMM YYYY')}\n⏰ ${combined.format('h:mm A')} (IST)`);
+    const echo = `✅ ${tOr(ctx.language, 'date_time_saved', 'Date and time saved')}\n📅 ${combined.format('dddd, D MMM YYYY')}\n⏰ ${combined.format('h:mm A')} (IST)`;
+    const nextIsVehicles = session.draft.tripType !== 'HOURLY' && session.draft.tripType !== 'ROUND_TRIP'
+      && !(env.BOOKING_ORDER === 'date_first' && !(session.draft.drop && session.draft.drop.address));
+    if (nextIsVehicles) ctx.echoPrefix = echo; // sent together with "Checking available vehicles": one message, and the right order
+    else await ctx.send.raw(echo);
   }
 
   if (session.draft.tripType === 'HOURLY') {
@@ -1207,7 +1213,13 @@ async function showVehicleOptions(ctx, { minSeats = 0 } = {}) {
     rentalHours: session.draft.rentalHours,
   });
   lookup.catch(() => {}); // handled below; avoids a stray warning while the message is being sent
-  await ctx.send.text('checking_vehicles');
+  if (ctx.echoPrefix) {
+    const carried = ctx.echoPrefix;
+    ctx.echoPrefix = null;
+    await ctx.send.raw(`${carried}\n\n${t(ctx.language, 'checking_vehicles')}`);
+  } else {
+    await ctx.send.text('checking_vehicles');
+  }
 
   let options;
   try {
