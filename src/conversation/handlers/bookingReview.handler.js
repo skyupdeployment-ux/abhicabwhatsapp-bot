@@ -42,6 +42,7 @@ async function showBookingReview(ctx) {
     `👥 ${d.passengerCount} passenger${d.passengerCount > 1 ? 's' : ''}\n\n` +
     `📍 Pickup: ${d.pickup.address}\n` +
     (d.drop?.address ? `🏁 Drop: ${d.drop.address}\n` : '') +
+    (d.distanceKm ? `📏 Distance: ${d.distanceKm} km${d.tripType === 'ROUND_TRIP' ? ' one way' : ''}\n` : '') +
     `📅 ${fmtDate(d.pickupAt)}\n` +
     `⏰ ${fmtTime(d.pickupAt)}\n` +
     (d.returnAt ? `↩️ Return: ${fmtDateTime(d.returnAt)}\n` : '') +
