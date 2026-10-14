@@ -69,4 +69,20 @@ async function resolveDistanceKm(pickup, drop) {
   return DEFAULT_KM;
 }
 
-module.exports = { resolveDistanceKm, haversineKm, DEFAULT_KM };
+/**
+ * Road distance of the whole route: pickup -> each stop -> drop. Without stops this is exactly resolveDistanceKm.
+ * Each leg is priced from its own road distance, so a stop adds the real extra kilometres.
+ */
+async function resolveRouteKm(pickup, drop) {
+  const stops = Array.isArray(drop?.stops) ? drop.stops : [];
+  if (stops.length === 0) return resolveDistanceKm(pickup, drop);
+  const points = [pickup, ...stops, drop];
+  let total = 0;
+  for (let i = 0; i < points.length - 1; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    total += await resolveDistanceKm(points[i], points[i + 1]);
+  }
+  return total;
+}
+
+module.exports = { resolveDistanceKm, resolveRouteKm, haversineKm, DEFAULT_KM };
