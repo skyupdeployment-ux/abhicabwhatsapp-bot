@@ -118,6 +118,7 @@ async function finishRoute(ctx, route) {
   // Say the places back in the chat, exactly as chosen on the page.
   await ctx.send.raw(
     `✅ ${route.drop ? tOr(ctx.language, 'route_saved', 'Pickup and drop saved') : tOr(ctx.language, 'pickup_saved', 'Pickup saved')}\n📍 ${route.pickup.address}` +
+    ((route.drop && route.drop.stops) || []).map((st, i) => `\n➕ Stop ${i + 1}: ${st.address}`).join('') +
     (route.drop ? `\n🏁 ${route.drop.address}` : '')
   );
   await transition(session, STATES.BOOKING_DATE);
