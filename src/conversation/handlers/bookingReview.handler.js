@@ -41,6 +41,7 @@ async function showBookingReview(ctx) {
     `📱 ${session.whatsappNumber}\n` +
     `👥 ${d.passengerCount} passenger${d.passengerCount > 1 ? 's' : ''}\n\n` +
     `📍 Pickup: ${d.pickup.address}\n` +
+    (d.drop?.stops || []).map((st, i) => `➕ Stop ${i + 1}: ${st.address}\n`).join('') +
     (d.drop?.address ? `🏁 Drop: ${d.drop.address}\n` : '') +
     (d.distanceKm ? `📏 Distance: ${d.distanceKm} km${d.tripType === 'ROUND_TRIP' ? ' one way' : ''}\n` : '') +
     `📅 ${fmtDate(d.pickupAt)}\n` +
