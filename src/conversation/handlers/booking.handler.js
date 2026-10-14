@@ -71,10 +71,59 @@ async function askPlaceOneTap(ctx, kind) {
   }
 }
 
+/**
+ * The pickup question as ONE button that opens the "Choose your ride" page: a Pickup and a Drop field with
+ * suggestions that show the km, "Use my current location", and a Map button. Returns true when it was sent.
+ */
+async function askRoutePage(ctx) {
+  const { language, session } = ctx;
+  if (env.ROUTE_PAGE === 'off' || !calendarLink.enabled()) return false;
+
+  const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(env.PLACE_SEARCH_NEAR || '');
+  const near = m ? { latitude: Number(m[1]), longitude: Number(m[2]) } : null;
+  const hourly = session.draft.tripType === 'HOURLY';
+  const token = calendarLink.createToken({ number: session.whatsappNumber, kind: 'routemap', near, extra: { hourly }, ttlMinutes: 120 });
+  const url = calendarLink.linkFor(token, 'route-map');
+  const body = `${t(language, 'ask_pickup')}\n\n${hourly
+    ? tOr(language, 'route_hint_hourly', 'Tap the button to choose your pickup on the map.')
+    : tOr(language, 'route_hint', 'Tap the button to choose your pickup and drop on the map.')}`;
+
+  if (env.LINK_AS_BUTTON) {
+    try {
+      await ctx.send.ctaUrlRaw({ body, text: hourly ? tOr(language, 'route_button_hourly', 'Choose pickup') : tOr(language, 'route_button', 'Pickup and drop'), url });
+      if (env.DATE_TYPE_HINT) await ctx.send.raw(tOr(language, 'route_type_hint', 'Can\'t see the button? Just type the pickup place name.'));
+      return true;
+    } catch (err) {
+      logger.warn({ err: err.message }, '[booking] the pickup and drop button could not be sent, sending the link as text');
+    }
+  }
+  try {
+    await ctx.send.raw(`${body}\n${url}`);
+    return true;
+  } catch (err) {
+    logger.warn({ err: err.message }, '[booking] the pickup and drop link could not be sent, using the other pickup options');
+    return false;
+  }
+}
+
+/** Pickup (and drop) came back together from the "Choose your ride" page: save both and go to the date. */
+async function finishRoute(ctx, route) {
+  const { session } = ctx;
+  session.draft.pickup = route.pickup;
+  if (route.drop) session.draft.drop = route.drop;
+  delete session.draft._placeOptions;
+  delete session.draft._placeQuery;
+  session.markModified('draft');
+  await session.save();
+  await transition(session, STATES.BOOKING_DATE);
+  await promptDate(ctx);
+}
+
 async function askPlace(ctx, kind = 'pickup') {
   const { language } = ctx;
   const question = t(language, kind === 'drop' ? 'ask_drop' : 'ask_pickup');
 
+  if (kind === 'pickup' && (await askRoutePage(ctx))) return;
   if (kind === 'pickup' && (await askPlaceOneTap(ctx, 'pickup'))) return;
 
   if (kind === 'pickup') {
@@ -331,6 +380,12 @@ async function handleBookingPickup(ctx) {
   const { message, session, language } = ctx;
   const title = (message.text || message.interactiveTitle || '').trim();
   const options = session.draft._placeOptions || [];
+
+  // Pickup (and drop) chosen together on the "Choose your ride" page
+  if (message.route && message.route.pickup) {
+    await finishRoute(ctx, message.route);
+    return;
+  }
 
   // "Current location" button
   if (message.interactiveId === 'PICKUP_CURRENT' || /^(📍\s*)?current location$/i.test(title)) {
@@ -996,7 +1051,7 @@ async function handleBookingTime(ctx) {
     await ctx.send.text('ask_rental_hours');
     return;
   }
-  if (env.BOOKING_ORDER === 'date_first') {
+  if (env.BOOKING_ORDER === 'date_first' && !(session.draft.drop && session.draft.drop.address)) {
     // pickup -> date -> time -> drop
     await transition(session, STATES.BOOKING_DROP);
     await askDrop(ctx);
