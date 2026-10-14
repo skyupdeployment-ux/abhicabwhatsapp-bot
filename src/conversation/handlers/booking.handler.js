@@ -51,9 +51,31 @@ async function startBooking(ctx) {
  *   [📍 Current location]  — then we ask for the location (see sendLocationPrompt)
  * Typing a place name, or sharing a pin with 📎 → Location, also works at any time.
  */
+/**
+ * One tap: the question itself carries WhatsApp's "Send location" button. It opens WhatsApp's own location
+ * screen: "Send your current location", a search bar with suggestions, and "Choose on map".
+ * Returns true when it was sent, false when the caller should use the buttons instead.
+ */
+async function askPlaceOneTap(ctx, kind) {
+  const { language } = ctx;
+  if (!(env.LOCATION_ONE_TAP && env.LOCATION_SEARCH === 'native' && env.LOCATION_REQUEST_BUTTON)) return false;
+  const body = kind === 'drop'
+    ? `${t(language, 'ask_drop')}\n\n${tOr(language, 'drop_one_tap_hint', 'Tap Send location, then search for your drop place or choose it on the map.')}`
+    : `${t(language, 'ask_pickup')}\n\n${tOr(language, 'pickup_one_tap_hint', 'Tap Send location, then share your current location, or search for a place or choose it on the map.')}`;
+  try {
+    await ctx.send.locationRequestRaw(body);
+    return true;
+  } catch (err) {
+    logger.warn({ err: err.message }, '[booking] the one-tap location button could not be sent, using the buttons');
+    return false;
+  }
+}
+
 async function askPlace(ctx, kind = 'pickup') {
   const { language } = ctx;
   const question = t(language, kind === 'drop' ? 'ask_drop' : 'ask_pickup');
+
+  if (kind === 'pickup' && (await askPlaceOneTap(ctx, 'pickup'))) return;
 
   if (kind === 'pickup') {
     const body = `${question}\n\n${tOr(language, 'pickup_button_hint', 'Tap Current location to share where you are, or Search place to find it by name.')}`;
@@ -108,6 +130,7 @@ async function sendLocationPrompt(ctx) {
 /** Drop question: a "Search place" button; the customer then types the name and picks a match. */
 async function askDrop(ctx) {
   const { language } = ctx;
+  if (await askPlaceOneTap(ctx, 'drop')) return;
   const body = `${t(language, 'ask_drop')}\n\n${tOr(language, 'drop_search_hint', 'Tap Search place, type the name, and pick it from the matches.')}`;
   try {
     await ctx.send.buttonsRaw(body, [{ id: 'DROP_SEARCH', title: tOr(language, 'btn_search_place', '🔍 Search place') }]);
