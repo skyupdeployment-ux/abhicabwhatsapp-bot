@@ -11,6 +11,21 @@ const http = axios.create({
   },
 });
 
+// Timing: how long each MSG91 call takes (this is a big part of the delay a customer feels).
+http.interceptors.request.use((cfg) => { cfg.metadata = { start: Date.now() }; return cfg; });
+http.interceptors.response.use(
+  (res) => {
+    const ms = Date.now() - (res.config.metadata ? res.config.metadata.start : Date.now());
+    logger.info({ ms, path: res.config.url }, ms >= 1500 ? '[perf] SLOW MSG91 call' : '[perf] MSG91 call');
+    return res;
+  },
+  (err) => {
+    const ms = Date.now() - (err.config && err.config.metadata ? err.config.metadata.start : Date.now());
+    logger.warn({ ms, path: err.config && err.config.url }, '[perf] MSG91 call failed');
+    return Promise.reject(err);
+  }
+);
+
 async function sendMessage(payload) {
   const body = {
     integrated_number: env.MSG91_INTEGRATED_NUMBER,
