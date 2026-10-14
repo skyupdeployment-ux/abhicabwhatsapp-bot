@@ -37,6 +37,7 @@ h1{font-size:18px;margin:0 0 10px;font-weight:600}
 .fields{flex:1;display:flex;flex-direction:column;gap:8px}
 .fields input{width:100%;height:46px;border-radius:10px;border:2px solid transparent;background:var(--tile);color:var(--text);font-size:16px;padding:0 12px}
 .fields input.on{border-color:var(--text);background:var(--card)}
+.stoprow{display:flex;gap:6px}.stoprow input{flex:1;min-width:0}.stoprow .x{width:44px;flex:none;border-radius:10px;border:1px solid var(--line);background:var(--tile);color:var(--text);font-size:20px;cursor:pointer}
 .tools{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
 .tools button{height:40px;border-radius:20px;border:1px solid var(--line);background:var(--tile);color:var(--text);font-size:14px;padding:0 14px;cursor:pointer}
 #list{list-style:none;margin:6px 0 0;padding:0}
@@ -58,9 +59,9 @@ h1{font-size:18px;margin:0 0 10px;font-weight:600}
 <h1 id="title">Choose your ride</h1>
 <div class="route">
 <div class="dots"><i class="g"></i><i class="line"></i><i class="o" id="odot"></i></div>
-<div class="fields"><input id="fp" class="on" placeholder="Pickup location" autocomplete="off" aria-label="Pickup location"><input id="fd" placeholder="Where to?" autocomplete="off" aria-label="Drop location"></div>
+<div class="fields" id="fields"><input id="fp" class="on" placeholder="Pickup location" autocomplete="off" aria-label="Pickup location"><input id="fd" placeholder="Where to?" autocomplete="off" aria-label="Drop location"></div>
 </div>
-<div class="tools"><button type="button" id="gps">Use my current location</button><button type="button" id="mapbtn">Map</button></div>
+<div class="tools"><button type="button" id="gps">Use my current location</button><button type="button" id="mapbtn">Map</button><button type="button" id="addstop">+ Add stop</button></div>
 <ul id="list"></ul>
 <div id="mapwrap" hidden><div id="map" role="application" aria-label="Map"></div><div id="maphint">Tap the map, or drag the pin, to set this place.</div></div>
 <div id="msg" role="status"></div>
@@ -78,25 +79,35 @@ var info;try{var b=token.split('.')[0].replace(/-/g,'+').replace(/_/g,'/');info=
 function $(id){return document.getElementById(id);}
 if(!info){$('card').innerHTML='<p>This link is not valid. Go back to WhatsApp and tap the button again.</p>';return;}
 var hourly=!!(info.x&&info.x.hourly);
-if(hourly){$('fd').style.display='none';$('odot').style.display='none';$('title').textContent='Choose your pickup';$('ok').textContent='Confirm pickup';$('fp').placeholder='Pickup location';}
+if(hourly){$('fd').style.display='none';$('odot').style.display='none';$('addstop').style.display='none';$('title').textContent='Choose your pickup';$('ok').textContent='Confirm pickup';$('fp').placeholder='Pickup location';}
 var st=(self.crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now())+Math.random().toString(16).slice(2);
-var sel={pickup:null,drop:null},active='pickup',gps=null,map=null,marker=null,mapOpen=false,seq=0,timer=null,busy=false;
+var sel={pickup:null,drop:null,stop1:null,stop2:null},active='pickup',gps=null,map=null,marker=null,mapOpen=false,seq=0,timer=null,busy=false;
 var inputs={pickup:$('fp'),drop:$('fd')};
+var STOPS=['stop1','stop2'];
 function say(t,err){$('msg').textContent=t||'';$('msg').className=err?'err':'';}
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 function api(path,opts){return fetch(path,opts).then(function(r){return r.json().then(function(j){return {s:r.status,j:j};});});}
 function hav(a,b){var R=6371,r=Math.PI/180,dl=(b.lat-a.lat)*r,dn=(b.lng-a.lng)*r,h=Math.sin(dl/2)*Math.sin(dl/2)+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dn/2)*Math.sin(dn/2);return R*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));}
+function chain(){var c=[sel.pickup];STOPS.forEach(function(k){if(inputs[k])c.push(sel[k]);});c.push(sel.drop);return c;}
+function prevOf(k){
+if(k==='pickup')return null;
+var order=['pickup'].concat(STOPS.filter(function(x){return inputs[x];})).concat(['drop']);
+var i=order.indexOf(k);
+for(var j=i-1;j>=0;j--){if(sel[order[j]])return sel[order[j]];}
+return null;}
 function origin(){
-if(active==='drop'&&sel.pickup)return sel.pickup;
+var pv=prevOf(active);if(pv)return pv;
 if(gps)return gps;
 if(sel.pickup)return sel.pickup;
 var c=info.c;return c&&c.latitude!=null?{lat:c.latitude,lng:c.longitude}:null;}
 function refresh(){
-var pend=(sel.pickup&&sel.pickup.pending)||(sel.drop&&sel.drop.pending);
-var ready=sel.pickup&&(hourly||sel.drop)&&!pend;
+var pend=Object.keys(sel).some(function(k){return sel[k]&&sel[k].pending;});
+var stopsOk=STOPS.every(function(k){return !inputs[k]||sel[k];});
+var ready=sel.pickup&&(hourly||sel.drop)&&stopsOk&&!pend;
 $('ok').disabled=!ready;
-if(sel.pickup&&sel.drop&&!pend){$('sum').textContent='About '+(Math.round(hav(sel.pickup,sel.drop)*10)/10)+' km in a straight line. The fare uses the road distance.';}else{$('sum').textContent='';}}
-function setActive(k){active=k;inputs.pickup.className=k==='pickup'?'on':'';inputs.drop.className=k==='drop'?'on':'';$('list').innerHTML='';if(mapOpen&&marker&&sel[k]){moveMarker(sel[k].lat,sel[k].lng,16);}}
+var pts=chain();
+if(pts.every(function(x){return x;})&&pts.length>=2&&!pend){var tot=0;for(var q=0;q<pts.length-1;q++){tot+=hav(pts[q],pts[q+1]);}$('sum').textContent='About '+(Math.round(tot*10)/10)+' km in a straight line. The fare uses the road distance.';}else{$('sum').textContent='';}}
+function setActive(k){active=k;Object.keys(inputs).forEach(function(n){inputs[n].className=n===k?'on':'';});$('list').innerHTML='';if(mapOpen&&marker&&sel[k]){moveMarker(sel[k].lat,sel[k].lng,16);}}
 function ensureMap(){
 if(map||typeof L==='undefined')return;
 map=L.map('map');
@@ -105,7 +116,7 @@ var c=origin();if(c){map.setView([c.lat,c.lng],13);}else{map.setView([20.5937,78
 map.on('click',function(e){fromPoint(active,e.latlng.lat,e.latlng.lng);});}
 function moveMarker(lat,lng,zoom){
 if(!map)return;
-var color=active==='drop'?'#f08a24':'#1a9e5c';
+var color=active==='drop'?'#f08a24':(active==='pickup'?'#1a9e5c':'#6b7280');
 if(!marker){marker=L.marker([lat,lng],{draggable:true,icon:L.divIcon({className:'',html:'<div class="pin" style="background:'+color+'"></div>',iconSize:[24,24],iconAnchor:[12,24]})}).addTo(map);
 marker.on('dragend',function(){var p=marker.getLatLng();fromPoint(active,p.lat,p.lng);});}
 else{marker.setLatLng([lat,lng]);marker.setIcon(L.divIcon({className:'',html:'<div class="pin" style="background:'+color+'"></div>',iconSize:[24,24],iconAnchor:[12,24]}));}
@@ -158,7 +169,21 @@ if(!x.j||!x.j.ok){say('Could not load that place. Please pick another.',true);re
 say('');sel[k]={mode:'place',placeId:it.id,lat:x.j.lat,lng:x.j.lng,address:x.j.name};inputs[k].value=it.main;
 if(mapOpen){ensureMap();moveMarker(x.j.lat,x.j.lng,16);}
 refresh();
-if(k==='pickup'&&!hourly){setActive('drop');inputs.drop.focus();}}).catch(function(){say('No connection. Please try again.',true);});}
+if(!hourly){var order=['pickup'].concat(STOPS.filter(function(x){return inputs[x];})).concat(['drop']);var nx=order.slice(order.indexOf(k)+1).filter(function(z){return !sel[z];})[0];if(nx){setActive(nx);inputs[nx].focus();}}}).catch(function(){say('No connection. Please try again.',true);});}
+function wire(k){
+inputs[k].addEventListener('focus',function(){setActive(k);});
+inputs[k].addEventListener('input',function(){sel[k]=null;refresh();clearTimeout(timer);timer=setTimeout(search,250);});}
+function addStop(){
+var k=STOPS.filter(function(x){return !inputs[x];})[0];
+if(!k){say('You can add up to 2 stops.');return;}
+var row=document.createElement('div');row.className='stoprow';row.id='row_'+k;
+var inp=document.createElement('input');inp.id='f_'+k;inp.placeholder=k==='stop1'?'Stop 1':'Stop 2';inp.autocomplete='off';inp.setAttribute('aria-label',inp.placeholder);
+var x=document.createElement('button');x.type='button';x.className='x';x.textContent='\u00d7';x.setAttribute('aria-label','Remove '+inp.placeholder);
+row.appendChild(inp);row.appendChild(x);$('fields').insertBefore(row,$('fd'));
+inputs[k]=inp;sel[k]=null;wire(k);
+x.addEventListener('click',function(){delete inputs[k];sel[k]=null;row.remove();setActive('drop');refresh();});
+inp.focus();refresh();}
+$('addstop').addEventListener('click',addStop);
 inputs.pickup.addEventListener('focus',function(){setActive('pickup');});
 inputs.drop.addEventListener('focus',function(){setActive('drop');});
 ['pickup','drop'].forEach(function(k){inputs[k].addEventListener('input',function(){sel[k]=null;refresh();clearTimeout(timer);timer=setTimeout(search,250);});});
@@ -172,10 +197,10 @@ var s=sel[active];if(s){moveMarker(s.lat,s.lng,16);}}});
 function spec(s){return s.mode==='place'?{placeId:s.placeId}:{lat:s.lat,lng:s.lng};}
 $('ok').addEventListener('click',function(){
 if(busy||$('ok').disabled)return;busy=true;$('ok').disabled=true;say('Saving...');
-var body={token:token,st:st,pickup:spec(sel.pickup),drop:hourly?null:spec(sel.drop)};
+var body={token:token,st:st,pickup:spec(sel.pickup),drop:hourly?null:spec(sel.drop),stops:hourly?[]:STOPS.filter(function(k){return inputs[k];}).map(function(k){return spec(sel[k]);})};
 api('/route-map/confirm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(x){
 if(x.j&&x.j.ok){var card=$('card'),wa=card.getAttribute('data-wa')||'';
-card.innerHTML='<div class="done"><div class="big">&#10003;</div><h1>'+(hourly?'Pickup saved':'Pickup and drop saved')+'</h1><div class="row"><b>Pickup:</b> '+esc(x.j.pickup||'')+'</div>'+(x.j.drop?'<div class="row"><b>Drop:</b> '+esc(x.j.drop)+'</div>':'')+'<p>Your booking is moving on in WhatsApp.</p>'+(wa?'<a href="'+wa+'">Back to WhatsApp</a>':'<p>You can close this page.</p>')+'</div>';return;}
+card.innerHTML='<div class="done"><div class="big">&#10003;</div><h1>'+(hourly?'Pickup saved':'Pickup and drop saved')+'</h1><div class="row"><b>Pickup:</b> '+esc(x.j.pickup||'')+'</div>'+(x.j.stops||[]).map(function(a,i){return '<div class="row"><b>Stop '+(i+1)+':</b> '+esc(a)+'</div>';}).join('')+(x.j.drop?'<div class="row"><b>Drop:</b> '+esc(x.j.drop)+'</div>':'')+'<p>Your booking is moving on in WhatsApp.</p>'+(wa?'<a href="'+wa+'">Back to WhatsApp</a>':'<p>You can close this page.</p>')+'</div>';return;}
 busy=false;$('ok').disabled=false;
 say(x.s===409?'This step is already done. Go back to WhatsApp.':(x.s===410?'This link has expired. Tap the button again in WhatsApp.':'Could not save that. Please try again.'),true);})
 .catch(function(){busy=false;$('ok').disabled=false;say('No connection. Please try again.',true);});});
@@ -201,7 +226,7 @@ const PAGE_CSP = [
   "default-src 'self'",
   "script-src 'self' https://unpkg.com",
   "style-src 'self' 'unsafe-inline' https://unpkg.com",
-  "img-src 'self' data: https://*.tile.openstreetmap.org https://unpkg.com",
+  "img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://unpkg.com",
   "connect-src 'self'",
   "base-uri 'none'",
   "frame-ancestors 'none'",
@@ -333,29 +358,38 @@ async function resolveSpec(spec, st) {
 
 /** POST /route-map/confirm  { token, st, pickup, drop }  — saves pickup and drop together; the booking carries on in WhatsApp. */
 async function confirm(req, res) {
-  const { token, st, pickup, drop } = req.body || {};
+  const { token, st, pickup, drop, stops } = req.body || {};
   const info = verifyToken(token);
   if (!okInfo(info)) return res.status(410).json({ ok: false, error: 'expired' });
   const hourly = !!(info.extra && info.extra.hourly);
   if (!pickup || (!hourly && !drop)) return res.status(400).json({ ok: false, error: 'missing_place' });
+  const stopSpecs = hourly ? [] : (Array.isArray(stops) ? stops : []);
+  if (stopSpecs.length > 2) return res.status(400).json({ ok: false, error: 'too_many_stops' });
 
   const session = await getPrisma().session.findUnique({ where: { whatsappNumber: info.number } });
   if (!session || session.state !== STATES.BOOKING_PICKUP) return res.status(409).json({ ok: false, error: 'not_waiting' });
 
   let p;
   let d = null;
+  let stopList = [];
   try {
-    [p, d] = await Promise.all([resolveSpec(pickup, st), hourly ? Promise.resolve(null) : resolveSpec(drop, st)]);
+    [p, d, ...stopList] = await Promise.all([
+      resolveSpec(pickup, st),
+      hourly ? Promise.resolve(null) : resolveSpec(drop, st),
+      ...stopSpecs.map((x) => resolveSpec(x, st)),
+    ]);
   } catch (err) {
     if (err.code === 400) return res.status(400).json({ ok: false, error: err.message });
     logger.warn({ status: err.response?.status, err: err.response?.data?.error?.message || err.message }, '[routeMap] could not resolve a place');
     return res.status(502).json({ ok: false, error: 'details_failed' });
   }
 
-  res.json({ ok: true, pickup: p.address, drop: d ? d.address : null });
+  // The stops travel inside the drop, so they are saved with the booking and used for the fare.
+  const dropWithStops = d ? { ...d, ...(stopList.length ? { stops: stopList } : {}) } : null;
+  res.json({ ok: true, pickup: p.address, drop: d ? d.address : null, stops: stopList.map((x) => x.address) });
   processInboundMessage(info.number, {
     id: `route-${crypto.randomUUID()}`, from: info.number, timestamp: null, type: 'route', text: null,
-    interactiveId: null, interactiveTitle: null, location: null, route: { pickup: p, drop: d },
+    interactiveId: null, interactiveTitle: null, location: null, route: { pickup: p, drop: dropWithStops },
   }).catch((err) => logger.error({ err: err.message }, '[routeMap] could not continue the booking'));
 }
 
