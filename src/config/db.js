@@ -12,11 +12,15 @@ async function connectDB() {
   if (prisma) return prisma;
 
   prisma = new PrismaClient({
-    log: [{ emit: 'event', level: 'error' }, { emit: 'event', level: 'warn' }],
+    log: [{ emit: 'event', level: 'error' }, { emit: 'event', level: 'warn' }, { emit: 'event', level: 'query' }],
   });
 
   prisma.$on('error', (e) => logger.error({ err: e.message }, '[db] Prisma error'));
   prisma.$on('warn', (e) => logger.warn({ warn: e.message }, '[db] Prisma warning'));
+  // Timing: only queries slower than 200 ms are logged (no values, so no customer data).
+  prisma.$on('query', (e) => {
+    if (e.duration >= 200) logger.warn({ ms: e.duration, sql: String(e.query).slice(0, 90) }, '[perf] slow database query');
+  });
 
   // $connect isn't strictly required (Prisma lazy-connects on first query),
   // but calling it explicitly here means a bad DATABASE_URL fails fast at
