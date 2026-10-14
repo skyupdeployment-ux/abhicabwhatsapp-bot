@@ -69,6 +69,10 @@ const env = {
   FLOW_TEMPLATE_NAMESPACE: required('FLOW_TEMPLATE_NAMESPACE', ''),
   FLOW_TEMPLATE_LANGUAGE: required('FLOW_TEMPLATE_LANGUAGE', 'en'),
 
+  // true (default) = the pickup and drop questions ARE the "Send location" button: one tap opens WhatsApp's own
+  // location screen (current location, search bar, Choose on map). false = the Current location / Search place buttons.
+  LOCATION_ONE_TAP: required('LOCATION_ONE_TAP', 'true') !== 'false',
+
   // The short "Can't see the button? Just type the date" line after the date button. false = one message less per booking.
   DATE_TYPE_HINT: required('DATE_TYPE_HINT', 'true') !== 'false',
 
