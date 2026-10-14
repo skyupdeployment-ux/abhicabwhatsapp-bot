@@ -2,6 +2,7 @@ const { extractFlowDate } = require('../conversation/inbound');
 const { logger } = require('../config/logger');
 const { normalizeInboundMessage } = require('../conversation/inbound');
 const { processInboundMessage } = require('../conversation/stateMachine');
+const { getOrCreateSession } = require('../conversation/sessionManager');
 const { getPrisma } = require('../config/db');
 const { normalizeWhatsAppNumber } = require('../utils/phone');
 const { perCustomerRateOk } = require('../middleware/rateLimiter');
@@ -45,6 +46,12 @@ async function receiveWebhook(req, res) {
 
 async function handleSingleMessage(event) {
   const messageId = event.uuid || event.requestId;
+  const whatsappNumber = normalizeWhatsAppNumber(event.customerNumber);
+
+  // Start loading the customer and session NOW, while the duplicate check runs: they are independent database
+  // trips, so doing them together saves one full round trip on every message.
+  const loading = getOrCreateSession(whatsappNumber);
+  loading.catch(() => {}); // if this message turns out to be a duplicate nobody waits for it
 
   // Duplicate delivery protection (spec section 47): unique index on
   // whatsappMessageId means a second insert throws — treat that as
@@ -63,8 +70,6 @@ async function handleSingleMessage(event) {
     }
   }
 
-  const whatsappNumber = normalizeWhatsAppNumber(event.customerNumber);
-
   if (!perCustomerRateOk(whatsappNumber)) {
     logger.warn({ whatsappNumber }, '[webhook] per-customer rate limit hit — message dropped');
     return;
@@ -72,7 +77,7 @@ async function handleSingleMessage(event) {
 
   const normalized = normalizeInboundMessage(event);
   const startedAt = Date.now();
-  await processInboundMessage(whatsappNumber, normalized);
+  await processInboundMessage(whatsappNumber, normalized, loading);
   // Timing: how long the bot took to handle this message, from receiving it to the last reply sent.
   const ms = Date.now() - startedAt;
   logger.info({ ms }, ms >= 3000 ? '[perf] SLOW message handled' : '[perf] message handled');
