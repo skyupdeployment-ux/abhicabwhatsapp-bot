@@ -77,6 +77,13 @@ const env = {
   // "auto" (default) = on when the server address is known; "off" = the Send location screen / buttons instead.
   ROUTE_PAGE: required('ROUTE_PAGE', 'auto'),
 
+  // Trip reminders 1 hour and 30 minutes before the pickup (CONFIRMED bookings). Free text works only within
+  // 24 hours of the customer's last message; otherwise these approved TEMPLATES (no variables) are used.
+  REMINDERS_ENABLED: required('REMINDERS_ENABLED', 'true') !== 'false',
+  REMINDER_1H_TEMPLATE: required('REMINDER_1H_TEMPLATE', ''),
+  REMINDER_30M_TEMPLATE: required('REMINDER_30M_TEMPLATE', ''),
+  REMINDER_TEMPLATE_NAMESPACE: required('REMINDER_TEMPLATE_NAMESPACE', ''),
+
   // The extra "Can't see the button? Just type ..." lines after a button. OFF by default (fewer messages); true = send them.
   DATE_TYPE_HINT: required('DATE_TYPE_HINT', 'false') === 'true',
 
