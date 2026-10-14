@@ -1,3 +1,4 @@
+const { extractFlowDate } = require('../conversation/inbound');
 const { logger } = require('../config/logger');
 const { normalizeInboundMessage } = require('../conversation/inbound');
 const { processInboundMessage } = require('../conversation/stateMachine');
@@ -31,7 +32,7 @@ async function receiveWebhook(req, res) {
     // are customer messages; outbound delivery-report events (direction "1",
     // or eventName like "sent"/"delivered"/"read") are not something the
     // conversation engine should reply to.
-           if (event.direction === '1' || (!event.text && !event.button && !event.interactive && !event.latitude && !event.messages)) {
+    if (event.direction === '1' || (!event.text && !event.button && !event.interactive && !event.latitude && !extractFlowDate(event))) {
       logger.debug({ eventName: event.eventName, requestId: event.requestId }, '[webhook] ignored — delivery/status report, not a customer message');
       return;
     }
@@ -70,7 +71,11 @@ async function handleSingleMessage(event) {
   }
 
   const normalized = normalizeInboundMessage(event);
+  const startedAt = Date.now();
   await processInboundMessage(whatsappNumber, normalized);
+  // Timing: how long the bot took to handle this message, from receiving it to the last reply sent.
+  const ms = Date.now() - startedAt;
+  logger.info({ ms }, ms >= 3000 ? '[perf] SLOW message handled' : '[perf] message handled');
 }
 
 module.exports = { receiveWebhook };
