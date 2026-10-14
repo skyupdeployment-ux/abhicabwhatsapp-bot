@@ -10,7 +10,7 @@ const { toNumbered, rememberOptions } = require('../numberedMenu');
 const { inr } = require('../../utils/format');
 const env = require('../../config/env');
 const { reverseGeocode } = require('../../integrations/abhicabs/geocodeService');
-const { searchPlaces } = require('../../integrations/abhicabs/placeSearchService');
+const { searchPlaces, addDistances } = require('../../integrations/abhicabs/placeSearchService');
 const calendarLink = require('../../utils/calendarLink');
 
 const TRIP_TYPES = [
@@ -299,8 +299,18 @@ async function finishPickup(ctx, location) {
 const placeRow = (m, i) => ({
   id: `PLACE_${i}`,
   title: m.name.slice(0, 24),
-  description: (m.name.length > 24 ? `${m.name} — ${m.address}` : m.address).slice(0, 72),
+  description: `${m.distanceKm != null ? `${m.approx ? '~' : ''}${m.distanceKm} km · ` : ''}${m.name.length > 24 ? `${m.name} — ${m.address}` : m.address}`.slice(0, 72),
 });
+
+/** The point distances are measured from: the pickup for the drop; for the pickup, the city centre if PLACE_SEARCH_NEAR is set. */
+function distanceOrigin(session, kind) {
+  if (kind === 'drop') {
+    const p = session.draft.pickup;
+    return p && p.latitude != null ? p : null;
+  }
+  const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(env.PLACE_SEARCH_NEAR || '');
+  return m ? { latitude: Number(m[1]), longitude: Number(m[2]) } : null;
+}
 
 /** After a place is picked from the search results, show it on a small map. A failure never blocks the booking. */
 async function showPlaceMap(ctx, place) {
@@ -377,6 +387,7 @@ async function handleBookingPickup(ctx) {
 
   // The customer typed a name: look it up and show the matches
   const matches = await searchPlaces(title);
+  await addDistances(distanceOrigin(session, 'pickup'), matches);
   if (!matches.length) {
     const typed = locationParser.fromTypedText(title);
     if (locationParser.isAmbiguous(typed.address)) {
@@ -507,6 +518,7 @@ async function handleBookingDrop(ctx) {
 
   // The customer typed a name: look it up and show the matches
   const matches = await searchPlaces(title, { near: session.draft.pickup });
+  await addDistances(distanceOrigin(session, 'drop'), matches);
   if (!matches.length) {
     // No search result (or search not available): use the text as typed, as before
     const typed = locationParser.fromTypedText(title);
