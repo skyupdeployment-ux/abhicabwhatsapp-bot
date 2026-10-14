@@ -64,4 +64,50 @@ async function searchPlaces(query, { near } = {}) {
   }
 }
 
-module.exports = { searchPlaces };
+function straightKm(a, b) {
+  const R = 6371;
+  const dLat = ((b.latitude - a.latitude) * Math.PI) / 180;
+  const dLon = ((b.longitude - a.longitude) * Math.PI) / 180;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos((a.latitude * Math.PI) / 180) * Math.cos((b.latitude * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+/**
+ * Adds the distance from `origin` ({ latitude, longitude }) to every match, like the "9.4 km" next to each place
+ * in WhatsApp's own location search. Road distance comes from ONE Google Distance Matrix call for all places;
+ * if that fails the straight-line distance is used instead and marked approximate (~).
+ * Sets match.distanceKm (one decimal) and match.approx. Without an origin nothing is added. Never throws.
+ */
+async function addDistances(origin, matches) {
+  if (!origin || origin.latitude == null || origin.longitude == null || !Array.isArray(matches) || matches.length === 0) return matches;
+  const key = env.GOOGLE_MAPS_API_KEY;
+  let road = null;
+  if (key) {
+    try {
+      const { data } = await axios.get('https://maps.googleapis.com/maps/api/distancematrix/json', {
+        params: {
+          origins: `${origin.latitude},${origin.longitude}`,
+          destinations: matches.map((m) => `${m.latitude},${m.longitude}`).join('|'),
+          mode: 'driving', units: 'metric', region: 'in', key,
+        },
+        timeout: 6000,
+      });
+      if (data?.status === 'OK') road = data?.rows?.[0]?.elements || null;
+    } catch (err) {
+      logger.warn({ err: err.message }, '[places] road distances failed, using straight-line distances');
+    }
+  }
+  matches.forEach((m, i) => {
+    const el = road && road[i];
+    if (el && el.status === 'OK' && el.distance?.value) {
+      m.distanceKm = Math.round(el.distance.value / 100) / 10;
+      m.approx = false;
+    } else {
+      m.distanceKm = Math.round(straightKm(origin, m) * 10) / 10;
+      m.approx = true;
+    }
+  });
+  return matches;
+}
+
+module.exports = { searchPlaces, addDistances };
