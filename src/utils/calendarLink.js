@@ -7,10 +7,10 @@ const secret = () => env.CALENDAR_LINK_SECRET || env.MSG91_WEBHOOK_SECRET;
 const enabled = () => Boolean(env.PUBLIC_BASE_URL && secret());
 const sign = (data) => crypto.createHmac('sha256', secret()).update(data).digest('base64url');
 
-// kind: 'date' (calendar page), 'pickup' or 'drop' (place search page). A link only works for its own kind.
-function createToken({ number, min = null, max = null, returnTrip = false, kind = 'date', near = null, ttlMinutes = 60 }) {
+// kind: 'date' (calendar page), 'routemap' (pickup + drop map page), 'pickup' or 'drop' (older pages). A link only works for its own kind.
+function createToken({ number, min = null, max = null, returnTrip = false, kind = 'date', near = null, extra = null, ttlMinutes = 60 }) {
   const payload = Buffer.from(
-    JSON.stringify({ n: number, a: min, b: max, r: returnTrip ? 1 : 0, k: kind, c: near, e: Date.now() + ttlMinutes * 60000 })
+    JSON.stringify({ n: number, a: min, b: max, r: returnTrip ? 1 : 0, k: kind, c: near, x: extra, e: Date.now() + ttlMinutes * 60000 })
   ).toString('base64url');
   return `${payload}.${sign(payload)}`;
 }
@@ -26,7 +26,7 @@ function verifyToken(token) {
   try {
     const p = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
     if (!p.e || Date.now() > p.e) return null;
-    return { number: p.n, min: p.a, max: p.b, returnTrip: !!p.r, kind: p.k || 'date', near: p.c || null };
+    return { number: p.n, min: p.a, max: p.b, returnTrip: !!p.r, kind: p.k || 'date', near: p.c || null, extra: p.x || null };
   } catch {
     return null;
   }
