@@ -162,7 +162,7 @@ async function processInboundMessage(whatsappNumber, normalizedMessage, preloade
 
 async function handleLoadedMessage(whatsappNumber, normalizedMessage, { session, customer, wasExpired }) {
   const language = session.language || 'en';
-  const send = makeSender(whatsappNumber, language);
+  const send = makeSender(whatsappNumber, language, () => session.state);
 
   const ctx = { session, customer, message: normalizedMessage, language, send };
 
