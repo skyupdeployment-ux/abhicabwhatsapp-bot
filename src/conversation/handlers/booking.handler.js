@@ -116,10 +116,19 @@ async function finishRoute(ctx, route) {
   session.markModified('draft');
   await session.save();
   // Say the places back in the chat, exactly as chosen on the page.
-  ctx.echoPrefix =
-    `✅ ${route.drop ? tOr(ctx.language, 'route_saved', 'Pickup and drop saved') : tOr(ctx.language, 'pickup_saved', 'Pickup saved')}\n📍 ${route.pickup.address}` +
-    ((route.drop && route.drop.stops) || []).map((st, i) => `\n➕ Stop ${i + 1}: ${st.address}`).join('') +
-    (route.drop ? `\n🏁 ${route.drop.address}` : '');
+  // Only a short "saved" line goes before the date question: no place names (they are in the booking summary at the end).
+  // ECHO_PLACE_NAMES=true brings the names back.
+  const stopCount = ((route.drop && route.drop.stops) || []).length;
+  const savedLine = !route.drop
+    ? tOr(ctx.language, 'pickup_saved', 'Pickup saved')
+    : stopCount
+      ? tOr(ctx.language, 'route_saved_stops', `Pickup, ${stopCount} stop${stopCount > 1 ? 's' : ''} and drop saved`)
+      : tOr(ctx.language, 'route_saved', 'Pickup and drop saved');
+  ctx.echoPrefix = env.ECHO_PLACE_NAMES
+    ? `✅ ${savedLine}\n📍 ${route.pickup.address}` +
+      ((route.drop && route.drop.stops) || []).map((st, i) => `\n➕ Stop ${i + 1}: ${st.address}`).join('') +
+      (route.drop ? `\n🏁 ${route.drop.address}` : '')
+    : `✅ ${savedLine}`;
   await transition(session, STATES.BOOKING_DATE);
   await promptDate(ctx);
 }
@@ -1212,21 +1221,37 @@ async function showVehicleOptions(ctx, { minSeats = 0 } = {}) {
     returnAt: session.draft.returnAt,
     rentalHours: session.draft.rentalHours,
   });
-  lookup.catch(() => {}); // handled below; avoids a stray warning while the message is being sent
-  if (ctx.echoPrefix) {
-    const carried = ctx.echoPrefix;
-    ctx.echoPrefix = null;
-    await ctx.send.raw(`${carried}\n\n${t(ctx.language, 'checking_vehicles')}`);
+  lookup.catch(() => {}); // handled below; avoids a stray warning while waiting
+
+  // The "saved" line from the step before (for example "Date and time saved"), if there is one.
+  const carried = ctx.echoPrefix || '';
+  ctx.echoPrefix = null;
+  const lead = carried ? `${carried}\n\n` : '';
+
+  // Wait a moment for the fare lookup. If it is quick, there is NO separate "Checking..." message: the saved line and
+  // the vehicle list go out as ONE message. Two messages sent back to back can arrive in the wrong order.
+  let early = null;
+  if (env.VEHICLES_FAST_MS > 0) {
+    early = await Promise.race([
+      lookup.then((value) => ({ value }), (error) => ({ error })),
+      new Promise((resolve) => setTimeout(() => resolve(null), env.VEHICLES_FAST_MS)),
+    ]);
+  }
+  if (!early) {
+    // Slow lookup (or the quick path is off): tell the customer we are working on it. The gap before the list is long enough to keep the order.
+    await ctx.send.raw(`${lead}${t(ctx.language, 'checking_vehicles')}`);
   } else {
-    await ctx.send.text('checking_vehicles');
+    ctx.listPrefix = lead; // carried inside the vehicle list message
   }
 
   let options;
   try {
-    options = await lookup;
+    options = early ? await (early.error ? Promise.reject(early.error) : Promise.resolve(early.value)) : await lookup;
   } catch (err) {
     logger.error({ err: err.message }, '[booking] getFareOptions failed');
-    await ctx.send.text('fare_api_failed');
+    const failed = ctx.listPrefix || '';
+    ctx.listPrefix = null;
+    await ctx.send.raw(`${failed}${t(ctx.language, 'fare_api_failed')}`);
     return;
   }
 
@@ -1239,7 +1264,9 @@ async function showVehicleOptions(ctx, { minSeats = 0 } = {}) {
   options = (options || []).filter((o) => o.seatingCapacity >= minSeats);
 
   if (options.length === 0) {
-    await ctx.send.text('no_vehicles_available');
+    const failedLead = ctx.listPrefix || '';
+    ctx.listPrefix = null;
+    await ctx.send.raw(`${failedLead}${t(ctx.language, 'no_vehicles_available')}`);
     const { escalateToHuman } = require('./handoff.handler');
     await escalateToHuman(ctx, 'NO_VEHICLES_AVAILABLE', { category: 'BOOKING_ISSUE' });
     return;
@@ -1295,8 +1322,10 @@ async function sendVehicleChoices(ctx) {
       };
     });
     const { rows: numbered, map } = toNumbered(rows);
+    const lead = ctx.listPrefix || '';
+    ctx.listPrefix = null;
     await ctx.send.listRaw(
-      t(language, 'ask_cab_type'),
+      `${lead}${t(language, 'ask_cab_type')}`,
       tOr(language, 'btn_select_cab_type', 'Select Cab Type'),
       [{ title: 'Cab types', rows: numbered }]
     );
@@ -1313,8 +1342,10 @@ async function sendVehicleChoices(ctx) {
     description: `${o.vehicleName} · ${o.seatingCapacity} seats`,
   }));
   const { rows: numbered, map } = toNumbered(rows);
+  const lead = ctx.listPrefix || '';
+  ctx.listPrefix = null;
   await ctx.send.listRaw(
-    t(language, 'select_vehicle'),
+    `${lead}${t(language, 'select_vehicle')}`,
     tOr(language, 'btn_select_vehicle', 'Select Vehicle'),
     [{ title: 'Vehicles', rows: numbered }]
   );
