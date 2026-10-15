@@ -89,6 +89,14 @@ const env = {
   REMINDER_30M_TEMPLATE: required('REMINDER_30M_TEMPLATE', ''),
   REMINDER_TEMPLATE_NAMESPACE: required('REMINDER_TEMPLATE_NAMESPACE', ''),
 
+  // If the fare lookup finishes within this many milliseconds, the bot sends ONE message ("saved" line + the vehicle list)
+  // instead of "Checking available vehicles..." followed by the list. Two quick messages can arrive in the wrong order.
+  // 0 = always send the separate "Checking..." message first.
+  VEHICLES_FAST_MS: Number(required('VEHICLES_FAST_MS', '1500')),
+
+  // After the pickup and drop page the chat says only "Pickup and drop saved". true = it also repeats the place names.
+  ECHO_PLACE_NAMES: required('ECHO_PLACE_NAMES', 'false') === 'true',
+
   // The extra "Can't see the button? Just type ..." lines after a button. OFF by default (fewer messages); true = send them.
   DATE_TYPE_HINT: required('DATE_TYPE_HINT', 'false') === 'true',
 
