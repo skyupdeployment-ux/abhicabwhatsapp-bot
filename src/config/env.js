@@ -77,6 +77,11 @@ const env = {
   // "auto" (default) = on when the server address is known; "off" = the Send location screen / buttons instead.
   ROUTE_PAGE: required('ROUTE_PAGE', 'auto'),
 
+  // The website link added to the end of every bot message. WEBSITE_LINKS=false turns it off.
+  // Per-step links go in src/config/stepLinks.js.
+  WEBSITE_URL: required('WEBSITE_URL', 'https://www.abhicabs24x7.com/'),
+  WEBSITE_LINKS: required('WEBSITE_LINKS', 'true') !== 'false',
+
   // Trip reminders 1 hour and 30 minutes before the pickup (CONFIRMED bookings). Free text works only within
   // 24 hours of the customer's last message; otherwise these approved TEMPLATES (no variables) are used.
   REMINDERS_ENABLED: required('REMINDERS_ENABLED', 'true') !== 'false',
