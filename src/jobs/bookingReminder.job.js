@@ -16,6 +16,10 @@ const dateParser = require('../conversation/nlu/dateParser'); // also loads the 
  *
  * Each reminder is sent once: it is claimed in the processed-messages table before sending.
  */
+// Reminders already claimed by this process: it is checked first so a booking inside its reminder window is not
+// claimed again (and logged as a database error) every minute.
+const claimed = new Set();
+
 const WINDOW_MS = 23 * 60 * 60 * 1000; // a safe margin inside WhatsApp's 24-hour window
 
 function reminders() {
@@ -49,10 +53,16 @@ async function sendOne(prisma, booking, reminder, now) {
   if (!number) return false;
 
   const key = `reminder:${booking.id}:${reminder.minutes}`;
+  if (claimed.has(key)) return false;
   try {
     await prisma.processedMessage.create({ data: { whatsappMessageId: key, whatsappNumber: number } });
+    if (claimed.size > 5000) claimed.clear();
+    claimed.add(key);
   } catch (err) {
-    if (err.code === 'P2002') return false; // this reminder was already sent (or claimed)
+    if (err.code === 'P2002') {
+      claimed.add(key); // sent earlier (maybe before a restart): remember it, do not try again
+      return false;
+    }
     throw err;
   }
 
@@ -71,6 +81,7 @@ async function sendOne(prisma, booking, reminder, now) {
     return true;
   } catch (err) {
     // Let the next run try again.
+    claimed.delete(key);
     await prisma.processedMessage.deleteMany({ where: { whatsappMessageId: key } }).catch(() => {});
     logger.error({ err: err.message, booking: booking.bookingNumber }, '[reminder] send failed, will retry');
     return false;
@@ -103,4 +114,4 @@ async function sendBookingReminders(now = new Date()) {
   return sent;
 }
 
-module.exports = { sendBookingReminders, reminderText };
+module.exports = { sendBookingReminders, reminderText, _claimed: claimed };
