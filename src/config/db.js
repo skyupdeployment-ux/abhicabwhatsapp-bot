@@ -15,7 +15,15 @@ async function connectDB() {
     log: [{ emit: 'event', level: 'error' }, { emit: 'event', level: 'warn' }, { emit: 'event', level: 'query' }],
   });
 
-  prisma.$on('error', (e) => logger.error({ err: e.message }, '[db] Prisma error'));
+  prisma.$on('error', (e) => {
+    // "Unique constraint failed" is how a duplicate message or an already-sent reminder is recognised on purpose:
+    // it is not a fault, so it is not shown as a red error.
+    if (/Unique constraint failed/i.test(String(e.message))) {
+      logger.info('[db] duplicate key ignored (already handled)');
+      return;
+    }
+    logger.error({ err: e.message }, '[db] Prisma error');
+  });
   prisma.$on('warn', (e) => logger.warn({ warn: e.message }, '[db] Prisma warning'));
   // Timing: only queries slower than 800 ms (SLOW_QUERY_MS) are logged (no values, so no customer data).
   prisma.$on('query', (e) => {
