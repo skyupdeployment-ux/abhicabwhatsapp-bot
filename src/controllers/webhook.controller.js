@@ -45,6 +45,7 @@ async function receiveWebhook(req, res) {
 }
 
 async function handleSingleMessage(event) {
+  const receivedAt = Date.now(); // when the bot got the message: used by the "ping" speed test
   const messageId = event.uuid || event.requestId;
   const whatsappNumber = normalizeWhatsAppNumber(event.customerNumber);
 
@@ -76,6 +77,7 @@ async function handleSingleMessage(event) {
   }
 
   const normalized = normalizeInboundMessage(event);
+  normalized.receivedAt = receivedAt;
   const startedAt = Date.now();
   await processInboundMessage(whatsappNumber, normalized, loading);
   // Timing: how long the bot took to handle this message, from receiving it to the last reply sent.
