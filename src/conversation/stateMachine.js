@@ -237,6 +237,13 @@ async function handleLoadedMessage(whatsappNumber, normalizedMessage, { session,
     return;
   }
 
+  // "ping": a one-word speed test (turn off with ENABLE_PING=false).
+  if (env.ENABLE_PING && !normalizedMessage.interactiveId && /^ping$/i.test(greetingText)) {
+    await require('./ping').runPing(ctx);
+    await touchSession(session);
+    return;
+  }
+
   if (session.humanHandoff || session.state === STATES.HUMAN_HANDOFF) {
     await handleHumanHandoff(ctx);
     await touchSession(session);
