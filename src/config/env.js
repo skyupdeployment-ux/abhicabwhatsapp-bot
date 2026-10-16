@@ -38,6 +38,8 @@ const env = {
   // WhatsApp Flow with a real calendar (tap a date). Leave empty to use the text calendar.
   // See date-calendar-flow.json for the Flow to create in WhatsApp Manager.
   DATE_FLOW_ID: required('DATE_FLOW_ID', ''),
+  // Typing "ping" in WhatsApp shows where the time goes (MSG91 in, the bot, MSG91 out). false = off.
+  ENABLE_PING: required('ENABLE_PING', 'true') !== 'false',
   // true = typing "flowtest" in WhatsApp sends the Flow to yourself and reports MSG91's answer. For checking only.
   ENABLE_FLOW_TEST: required('ENABLE_FLOW_TEST', 'false') === 'true',
   // true = the Flow also has a time dropdown (use date-time-calendar-flow.json); false = date only.
