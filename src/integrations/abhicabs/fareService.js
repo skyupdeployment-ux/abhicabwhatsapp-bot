@@ -4,6 +4,7 @@ const env = require('../../config/env');
 const { getPrisma } = require('../../config/db');
 const backendHttp = require('./backendHttp');
 const { resolveRouteKm } = require('./distanceService');
+const { packageFare } = require('./rentalPackages');
 
 // In-memory quote cache so a fare shown to the customer can be re-verified
 // at booking time without recomputing (and without letting the AI restate
@@ -75,13 +76,19 @@ async function getFareOptions({ tripType, pickup, drop, pickupAt, returnAt, rent
     let baseFare;
     if (tripType === 'HOURLY') {
       const hours = rentalHours || 4;
-      baseFare = (v.baseFarePerHour || v.baseFarePerKm * 10) * hours;
+      // The fixed rental packages (4 / 8 / 12 hours) when this vehicle has them, otherwise the plain hourly rate.
+      const pkg = packageFare(v.vehicleId, hours);
+      baseFare = pkg ? pkg.fare : (v.baseFarePerHour || v.baseFarePerKm * 10) * hours;
+    } else if (tripType === 'ROUND_TRIP') {
+      // Both legs are driven, and at least ROUND_TRIP_MIN_KM_PER_DAY km are billed for each day away.
+      const km = Math.max((distanceKm || 0) * 2, env.ROUND_TRIP_MIN_KM_PER_DAY * days);
+      baseFare = v.baseFarePerKm * km;
     } else {
-      const km = tripType === 'ROUND_TRIP' ? distanceKm * 2 * days : distanceKm;
-      baseFare = v.baseFarePerKm * (km || 0);
+      baseFare = v.baseFarePerKm * (distanceKm || 0);
     }
-    const driverAllowance = v.driverAllowancePerDay * days;
-    const tax = Math.round((baseFare + driverAllowance) * 0.05);
+    // Airport transfers carry no driver allowance (same as the backend).
+    const driverAllowance = tripType === 'AIRPORT' ? 0 : v.driverAllowancePerDay * days;
+    const tax = Math.round((baseFare + driverAllowance) * (env.FARE_TAX_PERCENT / 100));
     const total = Math.round(baseFare + driverAllowance + tax);
 
     return cacheQuote({
