@@ -66,6 +66,10 @@ const env = {
   // Signs calendar links. Optional: MSG91_WEBHOOK_SECRET is used when this is empty.
   CALENDAR_LINK_SECRET: required('CALENDAR_LINK_SECRET', ''),
 
+  // Vehicles: 'once' (default) loads the ABHI CABS fleet the first time the bot starts and switches the old ones off;
+  // 'always' reloads it at every start (resets any price edited in the database); 'off' never touches the vehicles.
+  FLEET_SYNC: required('FLEET_SYNC', 'once'),
+
   // Fare rules, matched to the ABHI CABS backend rate card:
   //  - FARE_TAX_PERCENT: tax added to a retail fare. The backend adds GST (18%, exclusive) to CORPORATE bookings only,
   //    so a WhatsApp (retail) fare has none: 0. Put 5 to bring back the old flat 5%.
