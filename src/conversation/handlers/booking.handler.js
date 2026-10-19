@@ -1378,6 +1378,7 @@ async function chooseVehicle(ctx, option) {
   session.draft.fareQuoteId = option.fareQuoteId;
   session.draft.fare = option.fare;
   session.draft.distanceKm = option.distanceKm ?? null;
+  session.draft.ratePerKm = option.ratePerKm ?? null;
   session.markModified('draft');
   await session.save();
 
