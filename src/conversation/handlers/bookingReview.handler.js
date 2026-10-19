@@ -4,6 +4,7 @@ const { t } = require('../../utils/i18n');
 const { callTool } = require('../../integrations/ai/tools');
 const { bookingIdempotencyKey } = require('../../utils/idempotency');
 const { logger } = require('../../config/logger');
+const env = require('../../config/env');
 const { fmtDate, fmtTime, fmtDateTime, inr } = require('../../utils/format');
 const { toNumbered, rememberOptions } = require('../numberedMenu');
 
@@ -29,6 +30,17 @@ async function handleBookingCustomerName(ctx) {
 
 // ── Booking summary ─────────────────────────────────────────────────
 
+/** A Google Maps link that shows the whole route (pickup, stops, drop), or '' when a place has no map position. */
+function googleRouteLink(d) {
+  const pt = (p) => (p && Number.isFinite(p.latitude) && Number.isFinite(p.longitude) ? `${p.latitude},${p.longitude}` : null);
+  const from = pt(d.pickup);
+  const to = pt(d.drop);
+  if (!from || !to) return '';
+  const stops = (d.drop?.stops || []).map(pt);
+  if (stops.some((x) => !x)) return '';
+  return `https://www.google.com/maps/dir/?api=1&origin=${from}&destination=${to}${stops.length ? `&waypoints=${stops.join('%7C')}` : ''}&travelmode=driving`;
+}
+
 async function showBookingReview(ctx) {
   const { session } = ctx;
   const d = session.draft;
@@ -46,6 +58,7 @@ async function showBookingReview(ctx) {
     (d.distanceKm ? `📏 Distance: ${d.distanceKm} km${d.tripType === 'ROUND_TRIP' ? ' one way' : ''}\n` : '') +
     // The rate per km, so the customer sees how the fare is made up (not for Local trips, which are priced by package).
     (d.ratePerKm && d.tripType !== 'HOURLY' ? `💵 Rate: ${inr(d.ratePerKm)}/km\n` : '') +
+    (env.SUMMARY_MAP_LINK && googleRouteLink(d) ? `🗺️ Route: ${googleRouteLink(d)}\n` : '') +
     `📅 ${fmtDate(d.pickupAt)}\n` +
     `⏰ ${fmtTime(d.pickupAt)}\n` +
     (d.returnAt ? `↩️ Return: ${fmtDateTime(d.returnAt)}\n` : '') +
