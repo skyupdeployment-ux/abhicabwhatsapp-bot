@@ -66,6 +66,13 @@ const env = {
   // Signs calendar links. Optional: MSG91_WEBHOOK_SECRET is used when this is empty.
   CALENDAR_LINK_SECRET: required('CALENDAR_LINK_SECRET', ''),
 
+  // Fare rules, matched to the ABHI CABS backend rate card:
+  //  - FARE_TAX_PERCENT: tax added to a retail fare. The backend adds GST (18%, exclusive) to CORPORATE bookings only,
+  //    so a WhatsApp (retail) fare has none: 0. Put 5 to bring back the old flat 5%.
+  //  - ROUND_TRIP_MIN_KM_PER_DAY: a round trip is billed for at least this many km for each day away (backend: 300).
+  FARE_TAX_PERCENT: Number(required('FARE_TAX_PERCENT', '0')),
+  ROUND_TRIP_MIN_KM_PER_DAY: Number(required('ROUND_TRIP_MIN_KM_PER_DAY', '300')),
+
   // The calendar Flow sent as an approved TEMPLATE with a Flow button (MSG91's documented way). Use with DATE_PICKER=template.
   FLOW_TEMPLATE_NAME: required('FLOW_TEMPLATE_NAME', ''),
   FLOW_TEMPLATE_NAMESPACE: required('FLOW_TEMPLATE_NAMESPACE', ''),
