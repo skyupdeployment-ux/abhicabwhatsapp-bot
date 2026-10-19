@@ -1,14 +1,24 @@
+require('./config/httpKeepAlive'); // first: connections to MSG91 and Google are kept open
 const env = require('./config/env');
 const { logger } = require('./config/logger');
 const { connectDB, disconnectDB } = require('./config/db');
 const app = require('./app');
 const { startJobs, stopJobs } = require('./jobs');
+const { syncFleetIfNeeded } = require('./utils/fleet');
 
 let server;
 
 async function start() {
   await connectDB();
   logger.info('[server] PostgreSQL (Prisma) ready');
+
+  // The first time, load the ABHI CABS vehicles and rates and switch the old placeholder vehicles off. A failure here
+  // must never stop the bot from starting.
+  try {
+    await syncFleetIfNeeded();
+  } catch (err) {
+    logger.error({ err: err.message }, '[fleet] could not load the vehicles (the bot keeps the ones it has)');
+  }
 
   server = app.listen(env.PORT, () => {
     logger.info(`[server] ABHI CABS WhatsApp bot listening on port ${env.PORT} (${env.NODE_ENV})`);
