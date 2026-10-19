@@ -98,6 +98,8 @@ async function getFareOptions({ tripType, pickup, drop, pickupAt, returnAt, rent
       category: v.category,
       seatingCapacity: v.seatingCapacity,
       ac: v.ac,
+      // The per-km rate, shown next to the vehicle in the list.
+      ratePerKm: v.baseFarePerKm,
       // One-way road distance, shown to the customer (null for hourly trips).
       distanceKm: distanceKm ? Math.round(distanceKm * 10) / 10 : null,
       fare: {
