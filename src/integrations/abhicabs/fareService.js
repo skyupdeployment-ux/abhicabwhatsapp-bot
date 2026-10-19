@@ -5,6 +5,7 @@ const { getPrisma } = require('../../config/db');
 const backendHttp = require('./backendHttp');
 const { resolveRouteKm } = require('./distanceService');
 const { packageFare } = require('./rentalPackages');
+const { roundTripRate } = require('./roundTripRates');
 
 // In-memory quote cache so a fare shown to the customer can be re-verified
 // at booking time without recomputing (and without letting the AI restate
@@ -73,6 +74,8 @@ async function getFareOptions({ tripType, pickup, drop, pickupAt, returnAt, rent
       : 1;
 
   return vehicles.map((v) => {
+    // A round trip can carry its own (lower) per-km rate; see roundTripRates.js. Otherwise the normal rate.
+    const perKm = tripType === 'ROUND_TRIP' ? roundTripRate(v.vehicleId, v.baseFarePerKm) : v.baseFarePerKm;
     let baseFare;
     if (tripType === 'HOURLY') {
       const hours = rentalHours || 4;
@@ -82,9 +85,9 @@ async function getFareOptions({ tripType, pickup, drop, pickupAt, returnAt, rent
     } else if (tripType === 'ROUND_TRIP') {
       // Both legs are driven, and at least ROUND_TRIP_MIN_KM_PER_DAY km are billed for each day away.
       const km = Math.max((distanceKm || 0) * 2, env.ROUND_TRIP_MIN_KM_PER_DAY * days);
-      baseFare = v.baseFarePerKm * km;
+      baseFare = perKm * km;
     } else {
-      baseFare = v.baseFarePerKm * (distanceKm || 0);
+      baseFare = perKm * (distanceKm || 0);
     }
     // Airport transfers carry no driver allowance (same as the backend).
     const driverAllowance = tripType === 'AIRPORT' ? 0 : v.driverAllowancePerDay * days;
@@ -99,7 +102,7 @@ async function getFareOptions({ tripType, pickup, drop, pickupAt, returnAt, rent
       seatingCapacity: v.seatingCapacity,
       ac: v.ac,
       // The per-km rate, shown next to the vehicle in the list.
-      ratePerKm: v.baseFarePerKm,
+      ratePerKm: perKm,
       // One-way road distance, shown to the customer (null for hourly trips).
       distanceKm: distanceKm ? Math.round(distanceKm * 10) / 10 : null,
       fare: {
