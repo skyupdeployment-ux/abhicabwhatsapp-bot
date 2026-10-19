@@ -14,9 +14,9 @@ const { searchPlaces, addDistances } = require('../../integrations/abhicabs/plac
 const calendarLink = require('../../utils/calendarLink');
 
 const TRIP_TYPES = [
-  { id: 'TRIP_ONE_WAY', value: 'ONE_WAY', key: 'trip_one_way', number: 1, listLabel: 'One Way', description: 'Pickup to drop, single journey', aliases: ['one way', 'oneway'] },
-  { id: 'TRIP_ROUND_TRIP', value: 'ROUND_TRIP', key: 'trip_round_trip', number: 2, listLabel: 'Round Trip', description: 'Go and return', aliases: ['round trip', 'roundtrip', 'round'] },
-  { id: 'TRIP_HOURLY', value: 'HOURLY', key: 'trip_hourly', number: 3, listLabel: 'Local', description: 'Hourly cab within the city', aliases: ['local', 'hourly', 'rental'] },
+  { id: 'TRIP_ONE_WAY', value: 'ONE_WAY', key: 'trip_one_way', number: 1, listLabel: 'One Way', description: 'From one place to another, e.g. Hebbal to Rajajinagar', aliases: ['one way', 'oneway'] },
+  { id: 'TRIP_ROUND_TRIP', value: 'ROUND_TRIP', key: 'trip_round_trip', number: 2, listLabel: 'Round Trip', description: 'Go to a place and come back', aliases: ['round trip', 'roundtrip', 'round'] },
+  { id: 'TRIP_HOURLY', value: 'HOURLY', key: 'trip_hourly', number: 3, listLabel: 'Local', description: 'Rent a cab by the hour. No drop place.', aliases: ['local', 'hourly', 'rental'] },
   { id: 'TRIP_AIRPORT', value: 'AIRPORT', key: 'trip_airport', number: 4, listLabel: 'Airport', description: 'Airport pickup or drop', aliases: ['airport'] },
 ];
 
