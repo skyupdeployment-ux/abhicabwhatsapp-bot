@@ -50,6 +50,8 @@ h1{font-size:18px;margin:0 0 10px;font-weight:600}
 #maphint{color:var(--muted);font-size:13px;margin-top:6px}
 .pin{width:24px;height:24px;border:3px solid #fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 2px 6px rgba(0,0,0,.4)}
 #sum{margin-top:10px;color:var(--muted);font-size:14px;min-height:18px}
+.gm{display:inline-block;margin-top:8px;color:var(--accent);font-weight:600;text-decoration:underline}
+#hourlyhint{margin:12px 0 0;padding:10px 12px;border-radius:10px;background:var(--tile);color:var(--text);font-size:14px;line-height:1.45}
 #ok{width:100%;height:52px;margin-top:8px;border:0;border-radius:12px;background:var(--accent);color:var(--on);font-size:16px;font-weight:600;cursor:pointer}
 #ok:disabled{opacity:.45;cursor:default}#msg{font-size:14px;color:var(--muted);min-height:20px;margin-top:8px}.err{color:var(--danger)!important}
 .done{text-align:center;padding:24px 6px}.done .big{font-size:46px;color:var(--accent)}.done .row{margin:8px 0;font-size:15px}
@@ -66,6 +68,8 @@ h1{font-size:18px;margin:0 0 10px;font-weight:600}
 <div id="mapwrap" hidden><div id="map" role="application" aria-label="Map"></div><div id="maphint">Tap the map, or drag the pin, to set this place.</div></div>
 <div id="msg" role="status"></div>
 <div id="sum"></div>
+<a id="gmap" class="gm" href="#" target="_blank" rel="noopener" hidden>View route in Google Maps</a>
+<p id="hourlyhint" hidden>This is for an hourly rental: one pickup, no drop. For a trip from one place to another (for example Hebbal to Rajajinagar), go back to WhatsApp and choose One Way.</p>
 <button type="button" id="ok" disabled>Confirm pickup and drop</button>
 </main>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="__JS_SRI__" crossorigin=""></script>
@@ -79,7 +83,7 @@ var info;try{var b=token.split('.')[0].replace(/-/g,'+').replace(/_/g,'/');info=
 function $(id){return document.getElementById(id);}
 if(!info){$('card').innerHTML='<p>This link is not valid. Go back to WhatsApp and tap the button again.</p>';return;}
 var hourly=!!(info.x&&info.x.hourly);
-if(hourly){$('fd').style.display='none';$('odot').style.display='none';$('addstop').style.display='none';$('title').textContent='Choose your pickup';$('ok').textContent='Confirm pickup';$('fp').placeholder='Pickup location';}
+if(hourly){$('hourlyhint').hidden=false;$('fd').style.display='none';$('odot').style.display='none';$('addstop').style.display='none';$('title').textContent='Choose your pickup';$('ok').textContent='Confirm pickup';$('fp').placeholder='Pickup location';}
 var st=(self.crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now())+Math.random().toString(16).slice(2);
 var sel={pickup:null,drop:null,stop1:null,stop2:null},active='pickup',gps=null,map=null,marker=null,mapOpen=false,seq=0,timer=null,busy=false;
 var inputs={pickup:$('fp'),drop:$('fd')};
@@ -106,6 +110,12 @@ var stopsOk=STOPS.every(function(k){return !inputs[k]||sel[k];});
 var ready=sel.pickup&&(hourly||sel.drop)&&stopsOk&&!pend;
 $('ok').disabled=!ready;
 var pts=chain();
+var gm=$('gmap');
+if(!hourly&&pts.length>=2&&pts.every(function(x){return x&&!x.pending;})){
+var ll=function(x){return x.lat+','+x.lng;};
+var mid=pts.slice(1,-1).map(ll).join('%7C');
+gm.href='https://www.google.com/maps/dir/?api=1&origin='+ll(pts[0])+'&destination='+ll(pts[pts.length-1])+(mid?'&waypoints='+mid:'')+'&travelmode=driving';
+gm.hidden=false;}else{gm.hidden=true;}
 if(pts.every(function(x){return x;})&&pts.length>=2&&!pend){var tot=0;for(var q=0;q<pts.length-1;q++){tot+=hav(pts[q],pts[q+1]);}$('sum').textContent='About '+(Math.round(tot*10)/10)+' km in a straight line. The fare uses the road distance.';}else{$('sum').textContent='';}}
 function setActive(k){active=k;Object.keys(inputs).forEach(function(n){inputs[n].className=n===k?'on':'';});$('list').innerHTML='';if(mapOpen&&marker&&sel[k]){moveMarker(sel[k].lat,sel[k].lng,16);}}
 function ensureMap(){
