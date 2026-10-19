@@ -204,7 +204,7 @@ card.innerHTML='<div class="done"><div class="big">&#10003;</div><h1>'+(hourly?'
 busy=false;$('ok').disabled=false;
 say(x.s===409?'This step is already done. Go back to WhatsApp.':(x.s===410?'This link has expired. Tap the button again in WhatsApp.':'Could not save that. Please try again.'),true);})
 .catch(function(){busy=false;$('ok').disabled=false;say('No connection. Please try again.',true);});});
-inputs.pickup.focus();
+if(info&&info.x&&info.x.pk&&!hourly){var pk=info.x.pk;sel.pickup={mode:'point',lat:pk.lat,lng:pk.lng,address:pk.address};inputs.pickup.value=pk.address;setActive('drop');refresh();inputs.drop.focus();}else{inputs.pickup.focus();}
 })();`;
 
 const okInfo = (info) => info && info.kind === KIND;
@@ -367,7 +367,7 @@ async function confirm(req, res) {
   if (stopSpecs.length > 2) return res.status(400).json({ ok: false, error: 'too_many_stops' });
 
   const session = await getPrisma().session.findUnique({ where: { whatsappNumber: info.number } });
-  if (!session || session.state !== STATES.BOOKING_PICKUP) return res.status(409).json({ ok: false, error: 'not_waiting' });
+  if (!session || (session.state !== STATES.BOOKING_PICKUP && session.state !== STATES.BOOKING_DROP)) return res.status(409).json({ ok: false, error: 'not_waiting' });
 
   let p;
   let d = null;
