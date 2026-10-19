@@ -44,11 +44,19 @@ async function showBookingReview(ctx) {
     (d.drop?.stops || []).map((st, i) => `➕ Stop ${i + 1}: ${st.address}\n`).join('') +
     (d.drop?.address ? `🏁 Drop: ${d.drop.address}\n` : '') +
     (d.distanceKm ? `📏 Distance: ${d.distanceKm} km${d.tripType === 'ROUND_TRIP' ? ' one way' : ''}\n` : '') +
+    // The rate per km, so the customer sees how the fare is made up (not for Local trips, which are priced by package).
+    (d.ratePerKm && d.tripType !== 'HOURLY' ? `💵 Rate: ${inr(d.ratePerKm)}/km\n` : '') +
     `📅 ${fmtDate(d.pickupAt)}\n` +
     `⏰ ${fmtTime(d.pickupAt)}\n` +
     (d.returnAt ? `↩️ Return: ${fmtDateTime(d.returnAt)}\n` : '') +
     (d.rentalHours ? `🕒 ${d.rentalHours} hours\n` : '') +
     `🚗 ${d.vehicleName || d.vehicleClass}\n\n` +
+    // A breakdown only when there is something besides the distance charge to explain.
+    (d.fare.driverAllowance > 0 || d.fare.tax > 0
+      ? `🧾 Fare: ${inr(d.fare.baseFare)}\n` +
+        (d.fare.driverAllowance > 0 ? `🧑‍✈️ Driver allowance: ${inr(d.fare.driverAllowance)}\n` : '') +
+        (d.fare.tax > 0 ? `📑 Tax: ${inr(d.fare.tax)}\n` : '')
+      : '') +
     `💰 Total fare: ${inr(d.fare.total)}`;
 
   const buttons = [
