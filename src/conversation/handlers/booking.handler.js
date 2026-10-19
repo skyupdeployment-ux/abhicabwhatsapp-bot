@@ -75,14 +75,19 @@ async function askPlaceOneTap(ctx, kind) {
  * The pickup question as ONE button that opens the "Choose your ride" page: a Pickup and a Drop field with
  * suggestions that show the km, "Use my current location", and a Map button. Returns true when it was sent.
  */
-async function askRoutePage(ctx) {
+async function askRoutePage(ctx, { prefillPickup = false } = {}) {
   const { language, session } = ctx;
   if (env.ROUTE_PAGE === 'off' || !calendarLink.enabled()) return false;
 
   const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(env.PLACE_SEARCH_NEAR || '');
   const near = m ? { latitude: Number(m[1]), longitude: Number(m[2]) } : null;
   const hourly = session.draft.tripType === 'HOURLY';
-  const token = calendarLink.createToken({ number: session.whatsappNumber, kind: 'routemap', near, extra: { hourly }, ttlMinutes: 120 });
+  // When the pickup is already known, the page opens with it filled in, so only the drop is left to choose.
+  const pk = session.draft.pickup;
+  const prefill = prefillPickup && !hourly && pk && Number.isFinite(pk.latitude) && Number.isFinite(pk.longitude) && pk.address
+    ? { pk: { lat: pk.latitude, lng: pk.longitude, address: String(pk.address).slice(0, 160) } }
+    : {};
+  const token = calendarLink.createToken({ number: session.whatsappNumber, kind: 'routemap', near, extra: { hourly, ...prefill }, ttlMinutes: 120 });
   const url = calendarLink.linkFor(token, 'route-map');
   const body = `${t(language, 'ask_pickup')}\n\n${hourly
     ? tOr(language, 'route_hint_hourly', 'Tap the button to choose your pickup on the map.')
@@ -192,7 +197,10 @@ async function sendLocationPrompt(ctx) {
 
 /** Drop question: a "Search place" button; the customer then types the name and picks a match. */
 async function askDrop(ctx) {
-  const { language } = ctx;
+  const { language, session } = ctx;
+  // With the one-page "Pickup and drop" button on, the drop is never asked as a separate question ("Where are you going?"
+  // with a Send location button): the same page opens again, with the pickup already filled in.
+  if (session.draft.tripType !== 'HOURLY' && env.BOOKING_ORDER !== 'date_first' && (await askRoutePage(ctx, { prefillPickup: true }))) return;
   if (await askPlaceOneTap(ctx, 'drop')) return;
   const body = `${t(language, 'ask_drop')}\n\n${tOr(language, 'drop_search_hint', 'Tap Search place, type the name, and pick it from the matches.')}`;
   try {
@@ -537,6 +545,12 @@ async function handleBookingDrop(ctx) {
   const { message, session, language } = ctx;
   const options = session.draft._placeOptions || [];
   const title = (message.text || message.interactiveTitle || '').trim();
+
+  // Pickup and drop chosen on the page (it was opened again from this step, with the pickup filled in)
+  if (message.route && message.route.pickup) {
+    await finishRoute(ctx, message.route);
+    return;
+  }
 
   // A map pin shared with 📎 → Location
   if (message.location) {
