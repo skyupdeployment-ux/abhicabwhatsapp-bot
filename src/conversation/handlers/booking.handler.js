@@ -1283,6 +1283,7 @@ async function showVehicleOptions(ctx, { minSeats = 0 } = {}) {
     ac: o.ac,
     fareQuoteId: o.fareQuoteId,
     distanceKm: o.distanceKm ?? null,
+    ratePerKm: o.ratePerKm ?? null,
     fare: o.fare,
   }));
   session.draft._vehicleCategory = null;
@@ -1298,6 +1299,11 @@ async function showVehicleOptions(ctx, { minSeats = 0 } = {}) {
  * cannot fit in one list — a short "Cab Type" list (Sedan, SUV, Tempo Traveller...)
  * followed by the cabs of the chosen type.
  */
+/** 19 -> "₹19", 1500 -> "₹1,500", 19.5 -> "₹19.5" */
+function rupees(n) {
+  return `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+}
+
 async function sendVehicleChoices(ctx) {
   const { session, language } = ctx;
   const all = session.draft._vehicleOptions || [];
@@ -1312,13 +1318,17 @@ async function sendVehicleChoices(ctx) {
     const rank = (c) => (CATEGORY_ORDER.indexOf(c) === -1 ? 99 : CATEGORY_ORDER.indexOf(c));
     const categories = [...groups.keys()].sort((a, b) => rank(a) - rank(b)).slice(0, MAX_LIST_ROWS);
 
+    const hourly = session.draft.tripType === 'HOURLY';
     const rows = categories.map((c, i) => {
       const g = groups.get(c);
+      // "from Rs 19/km": the lowest per-km rate in this type (not for hourly trips, which are priced by package).
+      const rates = g.map((o) => o.ratePerKm).filter((r) => Number.isFinite(r));
+      const from = !hourly && rates.length ? ` · from ${rupees(Math.min(...rates))}/km` : '';
       return {
         id: `CAT_${c}`,
         number: i + 1,
         label: tOr(language, `cab_category_${c}`, titleCase(c)),
-        description: `${g.length} option${g.length > 1 ? 's' : ''}`,
+        description: `${g.length} option${g.length > 1 ? 's' : ''}${from}`,
       };
     });
     const { rows: numbered, map } = toNumbered(rows);
@@ -1334,13 +1344,21 @@ async function sendVehicleChoices(ctx) {
   }
 
   const pool = (category ? all.filter((o) => o.category === category) : all).slice(0, MAX_LIST_ROWS);
-  const rows = pool.map((o, i) => ({
-    id: `VEHICLE_${o.vehicleId}`,
-    number: i + 1,
-    label: `${o.vehicleName}`.slice(0, 22),
-    // The row title is cut off at 24 characters by WhatsApp, so the full name goes here too.
-    description: `${o.vehicleName} · ${o.seatingCapacity} seats`,
-  }));
+  const hourlyTrip = session.draft.tripType === 'HOURLY';
+  const hours = session.draft.rentalHours || 4;
+  const rows = pool.map((o, i) => {
+    // The rate next to each vehicle: Rs per km, or for a Local trip the price for the hours asked.
+    const rate = hourlyTrip
+      ? ` · ${rupees(o.fare.total)} for ${hours} hr${hours > 1 ? 's' : ''}`
+      : Number.isFinite(o.ratePerKm) ? ` · ${rupees(o.ratePerKm)}/km` : '';
+    return {
+      id: `VEHICLE_${o.vehicleId}`,
+      number: i + 1,
+      label: `${o.vehicleName}`.slice(0, 22),
+      // The row title is cut off at 24 characters by WhatsApp, so the full name goes here too (WhatsApp allows 72 characters).
+      description: `${o.vehicleName} · ${o.seatingCapacity} seats${rate}`.slice(0, 72),
+    };
+  });
   const { rows: numbered, map } = toNumbered(rows);
   const lead = ctx.listPrefix || '';
   ctx.listPrefix = null;
