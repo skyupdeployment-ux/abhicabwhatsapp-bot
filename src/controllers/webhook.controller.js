@@ -3,6 +3,8 @@ const { logger } = require('../config/logger');
 const { normalizeInboundMessage } = require('../conversation/inbound');
 const { processInboundMessage } = require('../conversation/stateMachine');
 const { getOrCreateSession } = require('../conversation/sessionManager');
+const { sendText } = require('../integrations/whatsapp/messageBuilder');
+const env = require('../config/env');
 const { getPrisma } = require('../config/db');
 const { normalizeWhatsAppNumber } = require('../utils/phone');
 const { perCustomerRateOk } = require('../middleware/rateLimiter');
@@ -79,10 +81,44 @@ async function handleSingleMessage(event) {
   const normalized = normalizeInboundMessage(event);
   normalized.receivedAt = receivedAt;
   const startedAt = Date.now();
-  await processInboundMessage(whatsappNumber, normalized, loading);
+  try {
+    await processInboundMessage(whatsappNumber, normalized, loading);
+  } catch (err) {
+    await reportFailure(whatsappNumber, normalized, err);
+    return;
+  }
   // Timing: how long the bot took to handle this message, from receiving it to the last reply sent.
   const ms = Date.now() - startedAt;
   logger.info({ ms }, ms >= 3000 ? '[perf] SLOW message handled' : '[perf] message handled');
+}
+
+// A step that fails must never leave the customer in silence. The full error goes to the log under a short reference,
+// and the customer gets a short apology with the same reference (at most one per minute for each customer).
+const lastApology = new Map();
+async function reportFailure(whatsappNumber, normalized, err) {
+  const ref = `E-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  logger.error(
+    {
+      ref,
+      err: err && err.message,
+      stack: String((err && err.stack) || '').split('\n').slice(0, 7).join(' | '),
+      messageType: normalized && normalized.type,
+      text: normalized && normalized.text ? String(normalized.text).slice(0, 30) : undefined,
+    },
+    '[webhook] a step failed'
+  );
+  const now = Date.now();
+  if (now - (lastApology.get(whatsappNumber) || 0) < 60 * 1000) return;
+  lastApology.set(whatsappNumber, now);
+  if (lastApology.size > 5000) lastApology.clear();
+  try {
+    await sendText(
+      whatsappNumber,
+      `⚠️ Sorry, something went wrong on our side. Please type *Hi* to start again${env.SUPPORT_PHONE ? `, or call us on ${env.SUPPORT_PHONE}` : ''}.\n(Ref: ${ref})`
+    );
+  } catch (sendErr) {
+    logger.error({ err: sendErr.message }, '[webhook] could not send the apology message');
+  }
 }
 
 module.exports = { receiveWebhook };
