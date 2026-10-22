@@ -66,8 +66,11 @@ const env = {
   // Signs calendar links. Optional: MSG91_WEBHOOK_SECRET is used when this is empty.
   CALENDAR_LINK_SECRET: required('CALENDAR_LINK_SECRET', ''),
 
-  // A Google Maps route link in the booking summary (shows pickup, stops and drop on Google Maps). false = off.
-  SUMMARY_MAP_LINK: required('SUMMARY_MAP_LINK', 'true') !== 'false',
+  // Google Maps route links (they open the pickup, stops and drop on Google Maps). Both are OFF by default.
+  //  - SUMMARY_MAP_LINK=true  adds a "Route:" line to the booking summary.
+  //  - PAGE_MAP_LINK=true     adds "View route in Google Maps" to the pickup and drop page.
+  SUMMARY_MAP_LINK: required('SUMMARY_MAP_LINK', 'false') === 'true',
+  PAGE_MAP_LINK: required('PAGE_MAP_LINK', 'false') === 'true',
 
   // Vehicles: 'once' (default) loads the ABHI CABS fleet the first time the bot starts and switches the old ones off;
   // 'always' reloads it at every start (resets any price edited in the database); 'off' never touches the vehicles.
