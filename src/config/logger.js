@@ -45,6 +45,10 @@ const logger = pino({
   redact: {
     paths: [
       'req.headers.authorization',
+      'req.headers["x-webhook-secret"]',
+      'req.headers["x-admin-key"]',
+      'req.headers["x-razorpay-signature"]',
+      'req.headers.cookie',
       '*.accessToken',
       '*.access_token',
       '*.password',
