@@ -7,6 +7,7 @@ const { sendText } = require('../integrations/whatsapp/messageBuilder');
 const env = require('../config/env');
 const { getPrisma } = require('../config/db');
 const { normalizeWhatsAppNumber } = require('../utils/phone');
+const { toMs } = require('../conversation/ping');
 const { perCustomerRateOk } = require('../middleware/rateLimiter');
 
 /**
@@ -80,6 +81,7 @@ async function handleSingleMessage(event) {
 
   const normalized = normalizeInboundMessage(event);
   normalized.receivedAt = receivedAt;
+  const inboundMs = inboundDelayMs(normalized, receivedAt);
   const startedAt = Date.now();
   try {
     await processInboundMessage(whatsappNumber, normalized, loading);
@@ -89,7 +91,19 @@ async function handleSingleMessage(event) {
   }
   // Timing: how long the bot took to handle this message, from receiving it to the last reply sent.
   const ms = Date.now() - startedAt;
-  logger.info({ ms }, ms >= 3000 ? '[perf] SLOW message handled' : '[perf] message handled');
+  logger.info({ ms, inboundMs }, ms >= 3000 ? '[perf] SLOW message handled' : '[perf] message handled');
+  // How late MSG91 passed the customer's message to the bot (their own time on the message, to our arrival time).
+  // This is the part of the delay the bot can see but not fix, so it is called out loudly.
+  if (inboundMs !== null && inboundMs >= 10000) {
+    logger.warn({ inboundMs, seconds: Math.round(inboundMs / 1000) }, '[perf] SLOW inbound: MSG91 passed this message to the bot late (not the bot)');
+  }
+}
+
+/** Milliseconds between the moment WhatsApp/MSG91 stamped the message and the moment it reached the bot, or null. */
+function inboundDelayMs(normalized, receivedAt) {
+  const sentAt = toMs(normalized && normalized.timestamp);
+  if (!sentAt || sentAt > receivedAt + 5000) return null; // no time given, or a clock that disagrees: do not guess
+  return Math.max(0, receivedAt - sentAt);
 }
 
 // A step that fails must never leave the customer in silence. The full error goes to the log under a short reference,
@@ -121,4 +135,4 @@ async function reportFailure(whatsappNumber, normalized, err) {
   }
 }
 
-module.exports = { receiveWebhook };
+module.exports = { receiveWebhook, inboundDelayMs };
