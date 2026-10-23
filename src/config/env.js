@@ -72,6 +72,23 @@ const env = {
   SUMMARY_MAP_LINK: required('SUMMARY_MAP_LINK', 'false') === 'true',
   PAGE_MAP_LINK: required('PAGE_MAP_LINK', 'false') === 'true',
 
+  // Sending confirmed WhatsApp bookings to the ABHI CABS website (through its own API), so they show in its admin and dispatch.
+  //  SITE_BOOKINGS: 'off' (default) | 'dry-run' (only logs what it would send) | 'on'
+  //  SITE_API_URL: the website API base including /api/v1, for example https://your-site-api.up.railway.app/api/v1
+  //  SITE_SERVICE_KEY: the key the website backend gave the bot (it sends it as x-service-key). Keep it secret.
+  SITE_BOOKINGS: required('SITE_BOOKINGS', 'off'),
+  SITE_API_URL: required('SITE_API_URL', ''),
+  SITE_SERVICE_KEY: required('SITE_SERVICE_KEY', ''),
+
+  // Writing the bot's own columns (bookings.bot_*, customers.bot_*) on the website's tables. Turn on ONLY after the website team
+  // has run teammate-patch/bot-columns/migration.sql. 'off' (default) | 'on'.
+  SITE_COLUMNS: required('SITE_COLUMNS', 'off'),
+
+  // Where the vehicles and rates come from. 'bot' (default) = the bot's own vehicles. 'website' = the ABHI CABS website's
+  // tables (read only), so a price changed in the website admin shows up in the bot by itself.
+  RATES_SOURCE: required('RATES_SOURCE', 'bot'),
+  SITE_CITY_ID: Number(required('SITE_CITY_ID', '1')),
+
   // Vehicles: 'once' (default) loads the ABHI CABS fleet the first time the bot starts and switches the old ones off;
   // 'always' reloads it at every start (resets any price edited in the database); 'off' never touches the vehicles.
   FLEET_SYNC: required('FLEET_SYNC', 'once'),
