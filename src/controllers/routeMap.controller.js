@@ -111,7 +111,7 @@ var ready=sel.pickup&&(hourly||sel.drop)&&stopsOk&&!pend;
 $('ok').disabled=!ready;
 var pts=chain();
 var gm=$('gmap');
-if(!hourly&&pts.length>=2&&pts.every(function(x){return x&&!x.pending;})){
+if(info&&info.x&&info.x.gm&&!hourly&&pts.length>=2&&pts.every(function(x){return x&&!x.pending;})){
 var ll=function(x){return x.lat+','+x.lng;};
 var mid=pts.slice(1,-1).map(ll).join('%7C');
 gm.href='https://www.google.com/maps/dir/?api=1&origin='+ll(pts[0])+'&destination='+ll(pts[pts.length-1])+(mid?'&waypoints='+mid:'')+'&travelmode=driving';
@@ -144,15 +144,29 @@ sel[k]={mode:'point',lat:lat,lng:lng,address:a};inputs[k].value=a;refresh();})
 function useGps(){
 if(!navigator.geolocation){say('This browser cannot share your location. Search for a place instead.',true);return;}
 say('Getting your location...');
-navigator.geolocation.getCurrentPosition(function(pos){
+var done=false;
+// After 5 seconds, say it can be typed instead, so nobody is left staring at the spinner.
+var slow=setTimeout(function(){if(!done)say('Still looking for your location... you can also type your pickup place.');},5000);
+function ok(pos){
+if(done)return;done=true;clearTimeout(slow);
 say('');gps={lat:pos.coords.latitude,lng:pos.coords.longitude};
 active='pickup';setActive('pickup');
 if(mapOpen){ensureMap();}
 fromPoint('pickup',gps.lat,gps.lng);
-if(!hourly){setTimeout(function(){inputs.drop.focus();},50);}},
-function(err){
-say(err.code===1?'Location access was blocked. Allow it in your browser settings, or type your pickup place.':(err.code===2?'Your location is not available right now. Type your pickup place.':'Could not get your location in time. Try again, or type your pickup place.'),true);},
-{enableHighAccuracy:true,timeout:15000,maximumAge:0});}
+// A quick fix from Wi-Fi and mobile masts can be a few hundred metres out: say so, and the Map button fixes it.
+if(pos.coords.accuracy>1500){say('Your location is approximate. Tap Map to move the pin to the exact place.');}
+if(!hourly){setTimeout(function(){inputs.drop.focus();},50);}}
+function fail(err){
+if(done)return;done=true;clearTimeout(slow);
+say(err.code===1?'Location access was blocked. Allow it in your browser settings, or type your pickup place.':(err.code===2?'Your location is not available right now. Type your pickup place.':'Could not get your location in time. Try again, or type your pickup place.'),true);}
+// 1) The fast way first: Wi-Fi and mobile masts, and a reading up to 10 minutes old is fine. This answers in a second or two and
+//    still works indoors and with the phone in battery saving mode.
+navigator.geolocation.getCurrentPosition(ok,function(e1){
+if(done)return;
+if(e1.code===1){fail(e1);return;} // blocked by the person: asking again will not help
+// 2) The precise way (satellites), a little longer.
+navigator.geolocation.getCurrentPosition(ok,fail,{enableHighAccuracy:true,timeout:20000,maximumAge:0});
+},{enableHighAccuracy:false,timeout:8000,maximumAge:600000});}
 function renderList(items){
 $('list').innerHTML='';
 items.forEach(function(it){
@@ -215,6 +229,7 @@ busy=false;$('ok').disabled=false;
 say(x.s===409?'This step is already done. Go back to WhatsApp.':(x.s===410?'This link has expired. Tap the button again in WhatsApp.':'Could not save that. Please try again.'),true);})
 .catch(function(){busy=false;$('ok').disabled=false;say('No connection. Please try again.',true);});});
 if(info&&info.x&&info.x.pk&&!hourly){var pk=info.x.pk;sel.pickup={mode:'point',lat:pk.lat,lng:pk.lng,address:pk.address};inputs.pickup.value=pk.address;setActive('drop');refresh();inputs.drop.focus();}else{inputs.pickup.focus();}
+if(info&&info.x&&info.x.q){var qk=(info.x.qk==='drop'&&inputs.drop&&!hourly)?'drop':'pickup';inputs[qk].value=String(info.x.q);setActive(qk);inputs[qk].dispatchEvent(new Event('input'));}
 })();`;
 
 const okInfo = (info) => info && info.kind === KIND;
