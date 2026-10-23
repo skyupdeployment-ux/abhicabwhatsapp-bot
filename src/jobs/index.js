@@ -5,6 +5,7 @@ const { sendAbandonedBookingFollowUps } = require('./abandonedBooking.job');
 const { sendBookingReminders } = require('./bookingReminder.job');
 const { keepDatabaseWarm } = require('./dbKeepAlive.job');
 const { retryPendingSiteBookings } = require('../integrations/abhicabs/siteBooking');
+const { syncSiteStatuses } = require('../integrations/abhicabs/siteSync');
 
 const scheduled = [];
 
@@ -40,6 +41,7 @@ function startJobs() {
   scheduled.push(
     cron.schedule('*/5 * * * *', () => {
       retryPendingSiteBookings().catch((err) => logger.error({ err: err.message }, '[jobs] website booking retry failed'));
+      syncSiteStatuses().catch((err) => logger.error({ err: err.message }, '[jobs] website status sync failed'));
     })
   );
 
