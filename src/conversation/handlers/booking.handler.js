@@ -75,7 +75,32 @@ async function askPlaceOneTap(ctx, kind) {
  * The pickup question as ONE button that opens the "Choose your ride" page: a Pickup and a Drop field with
  * suggestions that show the km, "Use my current location", and a Map button. Returns true when it was sent.
  */
-async function askRoutePage(ctx, { prefillPickup = false } = {}) {
+// A typed message that is worth putting in the search box: not a greeting or a "hello?" sent while waiting.
+const NOT_A_PLACE = /^(hi+|hello+\??|hey+|ok+|okay|yes|no|pls|please|help|menu|test|wait|reply|anyone|any one|\?+)$/i;
+function usefulQuery(text) {
+  const t = String(text || '').trim();
+  return t.length >= 3 && t.length <= 80 && !NOT_A_PLACE.test(t) ? t : null;
+}
+
+// The page button was sent less than this long ago: it is still just above in the chat, so do not send it a second time.
+const ROUTE_BUTTON_FRESH_MS = 5 * 60 * 1000;
+
+function routeButtonIsFresh(session) {
+  const at = Number(session.draft && session.draft._routeAt);
+  return Number.isFinite(at) && at > 0 && Date.now() - at < ROUTE_BUTTON_FRESH_MS;
+}
+
+/** When the one-page flow is on and its button was sent a moment ago, a typed message gets a short reminder, not a second button. */
+async function nudgeRoutePage(ctx) {
+  const { language, session } = ctx;
+  if (env.ROUTE_PAGE === 'off' || !calendarLink.enabled() || !routeButtonIsFresh(session)) return false;
+  const hourly = session.draft.tripType === 'HOURLY';
+  const button = hourly ? tOr(language, 'route_button_hourly', 'Choose pickup') : tOr(language, 'route_button', 'Pickup and drop');
+  await ctx.send.raw(tOr(language, 'route_nudge', `👆 Please tap the *${button}* button above to choose your ${hourly ? 'pickup' : 'places'} on the map.`).replace('{button}', button));
+  return true;
+}
+
+async function askRoutePage(ctx, { prefillPickup = false, query = null, queryFor = 'pickup' } = {}) {
   const { language, session } = ctx;
   if (env.ROUTE_PAGE === 'off' || !calendarLink.enabled()) return false;
 
@@ -87,9 +112,10 @@ async function askRoutePage(ctx, { prefillPickup = false } = {}) {
   const prefill = prefillPickup && !hourly && pk && Number.isFinite(pk.latitude) && Number.isFinite(pk.longitude) && pk.address
     ? { pk: { lat: pk.latitude, lng: pk.longitude, address: String(pk.address).slice(0, 160) } }
     : {};
-  const token = calendarLink.createToken({ number: session.whatsappNumber, kind: 'routemap', near, extra: { hourly, ...prefill }, ttlMinutes: 120 });
+  const token = calendarLink.createToken({ number: session.whatsappNumber, kind: 'routemap', near, extra: { hourly, gm: !!env.PAGE_MAP_LINK, ...prefill, ...(query ? { q: String(query).slice(0, 80), qk: queryFor === 'drop' ? 'drop' : 'pickup' } : {}) }, ttlMinutes: 120 });
   const url = calendarLink.linkFor(token, 'route-map');
-  const body = `${t(language, 'ask_pickup')}\n\n${hourly
+  const typedLine = query ? `${tOr(language, 'route_typed', `You typed "${String(query).slice(0, 80)}". Tap the button and pick the exact place.`)}\n\n` : '';
+  const body = `${typedLine}${t(language, 'ask_pickup')}\n\n${hourly
     ? tOr(language, 'route_hint_hourly', 'Tap the button to choose your pickup on the map.')
     : tOr(language, 'route_hint', 'Tap the button to choose your pickup and drop on the map.')}`;
 
@@ -97,6 +123,8 @@ async function askRoutePage(ctx, { prefillPickup = false } = {}) {
     try {
       await ctx.send.ctaUrlRaw({ body, text: hourly ? tOr(language, 'route_button_hourly', 'Choose pickup') : tOr(language, 'route_button', 'Pickup and drop'), url });
       if (env.DATE_TYPE_HINT) await ctx.send.raw(tOr(language, 'route_type_hint', 'Can\'t see the button? Just type the pickup place name.'));
+      session.draft._routeAt = Date.now();
+      session.markModified('draft');
       return true;
     } catch (err) {
       logger.warn({ err: err.message }, '[booking] the pickup and drop button could not be sent, sending the link as text');
@@ -104,6 +132,8 @@ async function askRoutePage(ctx, { prefillPickup = false } = {}) {
   }
   try {
     await ctx.send.raw(`${body}\n${url}`);
+    session.draft._routeAt = Date.now();
+    session.markModified('draft');
     return true;
   } catch (err) {
     logger.warn({ err: err.message }, '[booking] the pickup and drop link could not be sent, using the other pickup options');
@@ -458,9 +488,15 @@ async function handleBookingPickup(ctx) {
   }
 
   if (!title) {
+    if (await askRoutePage(ctx)) return;
     await askPlace(ctx, 'pickup');
     return;
   }
+
+  // With the one-page "Pickup and drop" button on: if the button was sent a moment ago, just remind the customer to use it.
+  // If it was a while ago (it may be far up the chat), send it again with the typed name already in the search box.
+  if (await nudgeRoutePage(ctx)) return;
+  if (await askRoutePage(ctx, { query: usefulQuery(title), queryFor: 'pickup' })) return;
 
   // The customer typed a name: look it up and show the matches
   const matches = await searchPlaces(title);
@@ -597,6 +633,12 @@ async function handleBookingDrop(ctx) {
   if (!title) {
     await askDrop(ctx);
     return;
+  }
+
+  // With the one-page button on, a typed drop name opens the page (pickup already filled in) with that name in the drop box.
+  if (session.draft.tripType !== 'HOURLY' && env.BOOKING_ORDER !== 'date_first') {
+    if (await nudgeRoutePage(ctx)) return;
+    if (await askRoutePage(ctx, { prefillPickup: true, query: usefulQuery(title), queryFor: 'drop' })) return;
   }
 
   // The customer typed a name: look it up and show the matches
