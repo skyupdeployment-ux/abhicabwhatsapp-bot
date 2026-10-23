@@ -2,6 +2,8 @@ const env = require('../../config/env');
 const { getPrisma } = require('../../config/db');
 const backendHttp = require('./backendHttp');
 const { calculateCancellationFee } = require('../../utils/cancellationPolicy');
+const siteApi = require('./siteApi');
+const { mirroredBooking, siteNumber } = require('./siteCancel');
 
 function withId(row) {
   return row ? { ...row, _id: row.id } : row;
@@ -30,6 +32,23 @@ async function getAvailableActions(bookingId) {
  * real ABHI CABS policy once verified against the actual backend/source.
  */
 async function getCancellationQuote(bookingId) {
+  // A booking that is on the website is cancelled by the WEBSITE's policy: its fee and refund, never a guess.
+  const site = await mirroredBooking(bookingId);
+  if (site) {
+    let q;
+    try {
+      q = await siteApi.cancellationQuote(site.phone, site.name, site.site.id);
+    } catch (err) {
+      const info = siteApi.errorInfo(err);
+      // 409 / 422: the website says this booking can no longer be cancelled in its current state.
+      if (info.status === 409 || info.status === 422) throw new Error('BOOKING_NOT_CANCELLABLE');
+      throw err;
+    }
+    const fee = siteNumber(q && q.fee);
+    const refundAmount = siteNumber(q && (typeof q.refund === 'object' && q.refund ? (q.refund.amount ?? q.refund.refundAmount) : q.refund));
+    if (fee === null || refundAmount === null) throw new Error('SITE_QUOTE_INVALID'); // do not show numbers we cannot read
+    return { bookingId, fee, refundAmount, feePercent: null, band: (q && q.band) || null, currency: 'INR', source: 'website' };
+  }
   if (env.BACKEND_MODE === 'remote') {
     const { data } = await backendHttp.get(`/bookings/${bookingId}/cancellation-quote`);
     return data;
@@ -53,6 +72,30 @@ async function getCancellationQuote(bookingId) {
 
 /** cancelBooking — equivalent of POST /bookings/:id/cancel. Requires explicit confirmation upstream. */
 async function cancelBooking(bookingId, { reason, confirmedFee, confirmedRefund }) {
+  // On the website first: that is where dispatch, the fee and the refund are decided. Only then the bot's own record.
+  const site = await mirroredBooking(bookingId);
+  if (site) {
+    let result;
+    try {
+      result = await siteApi.cancelBooking(site.phone, site.name, site.site.id, reason, `bot-cancel-${site.booking.bookingNumber}`);
+    } catch (err) {
+      const info = siteApi.errorInfo(err);
+      if (info.status === 409 || info.status === 422 || info.code === 'INVALID_STATUS_TRANSITION') throw new Error('BOOKING_NOT_CANCELLABLE');
+      throw err;
+    }
+    const sb = (result && result.booking) || {};
+    const fee = siteNumber(sb.cancellationFee) ?? confirmedFee;
+    const refundAmount = siteNumber(result && (typeof result.refund === 'object' && result.refund ? (result.refund.amount ?? result.refund.refundAmount) : result.refund)) ?? confirmedRefund;
+    const prisma = getPrisma();
+    const updated = await prisma.booking.update({
+      where: { id: bookingId },
+      data: {
+        status: 'CANCELLED',
+        cancellation: { cancelledAt: new Date().toISOString(), reason, fee, refundAmount, source: 'website' },
+      },
+    });
+    return withId(updated);
+  }
   if (env.BACKEND_MODE === 'remote') {
     const { data } = await backendHttp.post(`/bookings/${bookingId}/cancel`, { reason });
     return data;
