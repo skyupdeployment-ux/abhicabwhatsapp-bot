@@ -3,7 +3,12 @@ const { transition } = require('../sessionManager');
 const { t } = require('../../utils/i18n');
 const { callTool } = require('../../integrations/ai/tools');
 const { logger } = require('../../config/logger');
+const env = require('../../config/env');
 const { toNumbered, rememberOptions } = require('../numberedMenu');
+
+function cannotCancelText() {
+  return `This booking cannot be cancelled here any more (the trip may already be under way).${env.SUPPORT_PHONE ? ` Please call us on ${env.SUPPORT_PHONE}.` : ' Please contact our support team.'}`;
+}
 
 async function promptBookingForCancellation(ctx) {
   const { session } = ctx;
@@ -34,6 +39,10 @@ async function promptBookingForCancellation(ctx) {
     quote = await callTool('getCancellationQuote', bookingId);
   } catch (err) {
     logger.error({ err: err.message }, '[cancellation] quote failed');
+    if (err.message === 'BOOKING_NOT_CANCELLABLE') {
+      await ctx.send.raw(cannotCancelText());
+      return;
+    }
     await ctx.send.text('generic_error');
     return;
   }
@@ -91,18 +100,30 @@ async function handleCancellationConfirmation(ctx) {
   const quote = session.draft._cancellationQuote;
   const reason = session.draft._cancellationReason;
 
+  let result;
   try {
-    await callTool('cancelBooking', session.activeBookingId, {
+    result = await callTool('cancelBooking', session.activeBookingId, {
       reason,
       confirmedFee: quote.fee,
       confirmedRefund: quote.refundAmount,
     });
   } catch (err) {
-    await ctx.send.text('generic_error');
+    logger.error({ err: err.message }, '[cancellation] cancel failed');
+    if (err.message === 'BOOKING_NOT_CANCELLABLE') {
+      await ctx.send.raw(cannotCancelText());
+    } else {
+      await ctx.send.text('generic_error');
+    }
     return;
   }
 
-  await ctx.send.text('booking_cancelled');
+  // When the website cancelled it, say the fee and refund it actually applied (they can differ from the quote by a few minutes).
+  const c = result && result.cancellation;
+  if (c && c.source === 'website') {
+    await ctx.send.raw(`${t(ctx.language, 'booking_cancelled')}\n\nCancellation fee: ₹${c.fee}\nRefund: ₹${c.refundAmount}`);
+  } else {
+    await ctx.send.text('booking_cancelled');
+  }
   const { renderMainMenu } = require('./mainMenu.handler');
   await transition(session, STATES.MAIN_MENU);
   await renderMainMenu(ctx);
