@@ -87,8 +87,9 @@ const PACKAGES = {
 };
 
 /** { fare, package, extraHours } for this vehicle and number of hours, or null when the vehicle has no packages. */
-function packageFare(vehicleId, hours) {
-  const list = PACKAGES[vehicleId];
+function packageFare(vehicleId, hours, listOverride) {
+  // listOverride: the vehicle's packages read from the website tables (when RATES_SOURCE=website). An empty list means none.
+  const list = Array.isArray(listOverride) ? listOverride : PACKAGES[vehicleId];
   if (!list || list.length === 0) return null;
   const sorted = [...list].sort((a, b) => a.hours - b.hours);
   const h = Math.max(1, Math.ceil(Number(hours) || 0));
