@@ -1,4 +1,5 @@
 const env = require('../../config/env');
+const { scheduleMirror } = require('./siteBooking');
 const { getPrisma } = require('../../config/db');
 const backendHttp = require('./backendHttp');
 const razorpayClient = require('../razorpay/client');
@@ -105,6 +106,7 @@ async function verifyAndCapturePayment({ razorpayOrderId, razorpayPaymentId, raz
   const booking = await prisma.booking.findUnique({ where: { paymentId: payment.id } });
   if (booking) {
     await prisma.booking.update({ where: { id: booking.id }, data: { status: 'CONFIRMED' } });
+    scheduleMirror(booking.id); // also create it on the website (background, only if SITE_BOOKINGS is on)
   }
 
   return withId(updated);
@@ -190,6 +192,7 @@ async function markBookingPayLater(bookingId) {
       fare: { ...booking.fare, paymentMode: 'PAY_LATER', amountPaid: 0, amountDue: booking.fare.total },
     },
   });
+  scheduleMirror(bookingId); // also create it on the website (background, only if SITE_BOOKINGS is on)
   return withId(updated);
 }
 
@@ -241,6 +244,7 @@ async function applyPaymentCaptured({ paymentId, razorpayPaymentId, amountPaise 
         },
       },
     });
+    scheduleMirror(booking.id); // also create it on the website (background, only if SITE_BOOKINGS is on)
   }
 
   return { alreadyCaptured: false, payment: withId(payment), booking: withId(booking), paidRupees };
