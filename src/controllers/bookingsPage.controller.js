@@ -37,6 +37,8 @@ function row(b, customer, payment) {
   const fare = b.fare || {};
   const driver = b.driver && b.driver.name ? `${b.driver.name}${b.driver.phone ? ` (${b.driver.phone})` : ''}` : '';
   const phone = customer && customer.whatsappNumber ? customer.whatsappNumber : '';
+  // The website's own booking number once the booking has reached it, or why it has not.
+  const site = fare.site && fare.site.bookingNumber ? fare.site.bookingNumber : fare.siteError ? `error: ${fare.siteError.message}` : '';
   return `<tr>
 <td><b>${esc(b.bookingNumber)}</b></td>
 <td><span class="st st-${esc(b.status)}">${esc(b.status)}</span></td>
@@ -53,6 +55,7 @@ function row(b, customer, payment) {
 <td>${esc(b.passenger && b.passenger.name)}${b.passenger && b.passenger.count ? ` (${esc(b.passenger.count)})` : ''}</td>
 <td>${phone ? `<a href="tel:+${esc(phone)}">+${esc(phone)}</a>` : ''}</td>
 <td>${esc(driver)}</td>
+<td>${esc(site)}</td>
 <td>${esc(dayjs(b.createdAt).tz(dateParser.TZ).format('D MMM, h:mm A'))}</td>
 </tr>`;
 }
@@ -79,8 +82,8 @@ a{color:var(--accent)}
 </style></head><body>
 <h1>Bookings</h1><p class="sub">Latest ${rows.length} (newest first). Times are India time. Read-only.</p>
 <div class="chips">${chips}</div>
-<div class="wrap"><table><thead><tr><th>Booking</th><th>Status</th><th>Pickup time</th><th>Trip</th><th>Pickup</th><th>Stops</th><th>Drop</th><th>Vehicle</th><th>Fare</th><th>Paid</th><th>Due</th><th>Payment</th><th>Passenger</th><th>Phone</th><th>Driver</th><th>Booked</th></tr></thead><tbody>
-${rows.length ? rows.join('\n') : '<tr><td colspan="16">No bookings found.</td></tr>'}
+<div class="wrap"><table><thead><tr><th>Booking</th><th>Status</th><th>Pickup time</th><th>Trip</th><th>Pickup</th><th>Stops</th><th>Drop</th><th>Vehicle</th><th>Fare</th><th>Paid</th><th>Due</th><th>Payment</th><th>Passenger</th><th>Phone</th><th>Driver</th><th>Website #</th><th>Booked</th></tr></thead><tbody>
+${rows.length ? rows.join('\n') : '<tr><td colspan="17">No bookings found.</td></tr>'}
 </tbody></table></div></body></html>`;
 }
 
