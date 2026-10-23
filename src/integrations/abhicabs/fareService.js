@@ -75,19 +75,25 @@ async function getFareOptions({ tripType, pickup, drop, pickupAt, returnAt, rent
 
   return vehicles.map((v) => {
     // A round trip can carry its own (lower) per-km rate; see roundTripRates.js. Otherwise the normal rate.
-    const perKm = tripType === 'ROUND_TRIP' ? roundTripRate(v.vehicleId, v.baseFarePerKm) : v.baseFarePerKm;
+    // Rates read from the website tables carry their own round trip and airport rates; otherwise the bot's own settings.
+    const perKm =
+      tripType === 'ROUND_TRIP'
+        ? (Number.isFinite(v.roundTripPerKm) ? v.roundTripPerKm : roundTripRate(v.vehicleId, v.baseFarePerKm))
+        : tripType === 'AIRPORT' && Number.isFinite(v.airportPerKm) ? v.airportPerKm : v.baseFarePerKm;
     let baseFare;
     if (tripType === 'HOURLY') {
       const hours = rentalHours || 4;
       // The fixed rental packages (4 / 8 / 12 hours) when this vehicle has them, otherwise the plain hourly rate.
-      const pkg = packageFare(v.vehicleId, hours);
+      const pkg = packageFare(v.vehicleId, hours, v.packages);
       baseFare = pkg ? pkg.fare : (v.baseFarePerHour || v.baseFarePerKm * 10) * hours;
     } else if (tripType === 'ROUND_TRIP') {
       // Both legs are driven, and at least ROUND_TRIP_MIN_KM_PER_DAY km are billed for each day away.
-      const km = Math.max((distanceKm || 0) * 2, env.ROUND_TRIP_MIN_KM_PER_DAY * days);
+      const minPerDay = Number.isFinite(v.minKmPerDay) ? v.minKmPerDay : env.ROUND_TRIP_MIN_KM_PER_DAY;
+      const km = Math.max((distanceKm || 0) * 2, minPerDay * days);
       baseFare = perKm * km;
     } else {
-      baseFare = perKm * (distanceKm || 0);
+      // A minimum billable distance, when the website sets one for this vehicle (0 = none).
+      baseFare = perKm * Math.max(distanceKm || 0, v.minimumKm || 0);
     }
     // Airport transfers carry no driver allowance (same as the backend).
     const driverAllowance = tripType === 'AIRPORT' ? 0 : v.driverAllowancePerDay * days;
