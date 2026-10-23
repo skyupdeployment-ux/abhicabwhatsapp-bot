@@ -72,8 +72,40 @@ async function createBooking(phone, profileName, payload, idempotencyKey) {
   return (d && d.booking) || d;
 }
 
+// One authorised call. If the 15 minute token has run out (401) it is exchanged again, once.
+async function withToken(phone, profileName, call) {
+  try {
+    return await call(await startSession(phone, profileName));
+  } catch (err) {
+    if (err && err.response && err.response.status === 401) {
+      tokens.delete(phone);
+      return call(await startSession(phone, profileName, { force: true }));
+    }
+    throw err;
+  }
+}
+
+const auth = (session, extra = {}) => ({
+  headers: { Authorization: `Bearer ${session.token}`, 'x-client-source': 'whatsapp-bot', ...extra },
+  timeout: 15000,
+});
+
+/** What cancelling this booking would cost right now, by the website's own policy: { fee, refund, band }. */
+async function cancellationQuote(phone, profileName, siteBookingId) {
+  const res = await withToken(phone, profileName, (s) => axios.get(`${base()}/bookings/${encodeURIComponent(siteBookingId)}/cancellation-quote`, auth(s)));
+  return unwrap(res);
+}
+
+/** Cancels the booking on the website. The reason is required there (3 to 500 characters). Returns { booking, refund }. */
+async function cancelBooking(phone, profileName, siteBookingId, reason, idempotencyKey) {
+  const res = await withToken(phone, profileName, (s) =>
+    axios.post(`${base()}/bookings/${encodeURIComponent(siteBookingId)}/cancel`, { reason: String(reason || '').slice(0, 500) }, auth(s, { 'Idempotency-Key': idempotencyKey, 'Content-Type': 'application/json' }))
+  );
+  return unwrap(res);
+}
+
 function clearSessions() {
   tokens.clear();
 }
 
-module.exports = { startSession, createBooking, errorInfo, clearSessions };
+module.exports = { startSession, createBooking, cancellationQuote, cancelBooking, errorInfo, clearSessions };
