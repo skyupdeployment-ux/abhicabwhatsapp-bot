@@ -35,8 +35,8 @@ async function getVehicleById(vehicleId) {
     const { data } = await backendHttp.get(`/vehicles/${vehicleId}`);
     return data;
   }
-  const prisma = getPrisma();
-  return prisma.vehicle.findFirst({ where: { vehicleId, active: true } });
+  const all = await getActiveVehicles();
+  return all.find((v) => v.vehicleId === vehicleId) || null;
 }
 
 module.exports = { getAvailableVehicles, getVehicleById };
