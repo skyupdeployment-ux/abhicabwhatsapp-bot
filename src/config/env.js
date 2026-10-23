@@ -80,6 +80,13 @@ const env = {
   SITE_API_URL: required('SITE_API_URL', ''),
   SITE_SERVICE_KEY: required('SITE_SERVICE_KEY', ''),
 
+  // Cancelling on WhatsApp also cancels the website booking, using the WEBSITE's real fee and refund ('off' default | 'on').
+  // Needs SITE_API_URL and SITE_SERVICE_KEY like SITE_BOOKINGS. Only bookings that reached the website are affected.
+  SITE_CANCEL: required('SITE_CANCEL', 'off'),
+  // Every 5 minutes the bot reads the website's bookings table (SELECT only) so My Booking and the reminders follow what
+  // the website team does: cancelled by them, driver and car assigned, completed. 'off' default | 'on'.
+  SITE_SYNC: required('SITE_SYNC', 'off'),
+
   // Writing the bot's own columns (bookings.bot_*, customers.bot_*) on the website's tables. Turn on ONLY after the website team
   // has run teammate-patch/bot-columns/migration.sql. 'off' (default) | 'on'.
   SITE_COLUMNS: required('SITE_COLUMNS', 'off'),
