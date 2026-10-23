@@ -95,7 +95,7 @@ async function sendBookingReminders(now = new Date()) {
   const horizon = new Date(now.getTime() + (list[0].minutes + 1) * 60000);
 
   const bookings = await prisma.booking.findMany({
-    where: { status: 'CONFIRMED', pickupAt: { gte: now, lte: horizon } },
+    where: { status: { in: ['CONFIRMED', 'DRIVER_ASSIGNED'] }, pickupAt: { gte: now, lte: horizon } },
     take: 200,
   });
 
